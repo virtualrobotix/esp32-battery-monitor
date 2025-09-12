@@ -1,0 +1,51 @@
+# Build files
+build/
+build_*/
+*.bin
+*.elf
+*.map
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Arduino IDE
+libraries/
+hardware/
+
+# Temporary files
+*.tmp
+*.bak
+*.orig
+
+# Log files
+*.log
+
+# Compiled libraries
+*.a
+*.so
+*.dylib
+*.dll
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.env
+
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*

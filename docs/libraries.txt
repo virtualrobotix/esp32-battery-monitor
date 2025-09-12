@@ -1,0 +1,84 @@
+# Librerie Richieste per ESP32 Battery Monitor
+
+## Librerie Standard Arduino
+Queste librerie sono incluse di default con ESP32:
+
+- **WiFi** - Gestione WiFi e Access Point
+- **WebServer** - Server web per interfaccia
+- **ArduinoJson** - Parsing e generazione JSON
+
+## Installazione Librerie
+
+### Arduino IDE
+1. Aprire Arduino IDE
+2. Andare su **Strumenti** → **Gestisci librerie**
+3. Cercare e installare:
+   - **ArduinoJson** (versione 6.x o superiore)
+
+### PlatformIO
+Se usi PlatformIO, aggiungi al file `platformio.ini`:
+
+```ini
+[env:esp32dev]
+platform = espressif32
+board = esp32dev
+framework = arduino
+lib_deps = 
+    bblanchon/ArduinoJson@^6.21.0
+```
+
+## Librerie Opzionali
+
+### Per Funzionalità Avanzate
+- **SD** - Salvataggio dati su scheda SD
+- **SPIFFS** - File system per web interface
+- **Preferences** - Salvataggio configurazioni
+- **OTA** - Aggiornamento firmware wireless
+
+### Per Debug e Monitoraggio
+- **FreeRTOS** - Task scheduling avanzato
+- **esp_timer** - Timer ad alta precisione
+- **esp_adc_cal** - Calibrazione ADC
+
+## Note Installazione
+
+### ArduinoJson
+```cpp
+#include <ArduinoJson.h>
+// Versione consigliata: 6.21.0 o superiore
+```
+
+### WiFi
+```cpp
+#include <WiFi.h>
+// Inclusa di default con ESP32
+```
+
+### WebServer
+```cpp
+#include <WebServer.h>
+// Inclusa di default con ESP32
+```
+
+## Verifica Installazione
+
+Per verificare che tutte le librerie siano installate correttamente, compila il progetto:
+
+1. Aprire `esp32_battery_monitor.ino`
+2. Selezionare board "ESP32 Dev Module"
+3. Compilare (Ctrl+R)
+4. Se non ci sono errori, le librerie sono installate correttamente
+
+## Problemi Comuni
+
+### Errore "ArduinoJson not found"
+- Installare ArduinoJson dalla libreria manager
+- Verificare versione compatibile (6.x)
+
+### Errore "WiFi not found"
+- Verificare di aver selezionato board ESP32
+- Aggiornare ESP32 board package
+
+### Errore compilazione
+- Verificare versione Arduino IDE (1.8.13+)
+- Aggiornare ESP32 board package all'ultima versione
