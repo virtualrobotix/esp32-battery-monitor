@@ -1,4 +1,4 @@
-/*
+  /*
  * ESP32 Battery Monitor & Differential Motor Control
  * 
  * Funzionalità:
@@ -17,6 +17,7 @@
 #include <WiFi.h>
 #include <WebServer.h>
 #include <ArduinoJson.h>
+#include <Preferences.h>
 
 // ============================================================================
 // CONFIGURAZIONE PIN
@@ -155,6 +156,66 @@ float loop_frequency = 0.0;
 const char* ssid = "ESP32_BatteryMonitor";
 const char* password = "battery123";
 WebServer server(80);
+Preferences preferences;
+
+// ============================================================================
+// GESTIONE MEMORIA FLASH - IMPOSTAZIONI PERMANENTI
+// ============================================================================
+
+// Salva le impostazioni di calibrazione nella memoria flash
+void saveCalibrationToFlash() {
+  preferences.begin("calibration", false);
+  
+  for (int i = 0; i < 3; i++) {
+    String prefix = "bat" + String(i) + "_";
+    
+    preferences.putFloat((prefix + "v_offset").c_str(), calibration[i].voltage_offset);
+    preferences.putFloat((prefix + "v_scale").c_str(), calibration[i].voltage_scale);
+    preferences.putFloat((prefix + "c_offset").c_str(), calibration[i].current_offset);
+    preferences.putFloat((prefix + "c_scale").c_str(), calibration[i].current_scale);
+    preferences.putFloat((prefix + "divider").c_str(), calibration[i].divider_ratio);
+  }
+  
+  preferences.end();
+  Serial.println("💾 Impostazioni di calibrazione salvate nella memoria flash");
+}
+
+// Carica le impostazioni di calibrazione dalla memoria flash
+void loadCalibrationFromFlash() {
+  preferences.begin("calibration", false);
+  
+  for (int i = 0; i < 3; i++) {
+    String prefix = "bat" + String(i) + "_";
+    
+    // Carica valori salvati, usa valori di default se non trovati
+    calibration[i].voltage_offset = preferences.getFloat((prefix + "v_offset").c_str(), 0.0);
+    calibration[i].voltage_scale = preferences.getFloat((prefix + "v_scale").c_str(), 1.0);
+    calibration[i].current_offset = preferences.getFloat((prefix + "c_offset").c_str(), 0.0);
+    calibration[i].current_scale = preferences.getFloat((prefix + "c_scale").c_str(), 1.0);
+    calibration[i].divider_ratio = preferences.getFloat((prefix + "divider").c_str(), DIVIDER_6S_RATIO);
+  }
+  
+  preferences.end();
+  Serial.println("📂 Impostazioni di calibrazione caricate dalla memoria flash");
+}
+
+// Reset delle impostazioni di calibrazione (torna ai valori di default)
+void resetCalibrationToDefault() {
+  preferences.begin("calibration", false);
+  preferences.clear();
+  preferences.end();
+  
+  // Reimposta ai valori di default
+  for (int i = 0; i < 3; i++) {
+    calibration[i].voltage_offset = 0.0;
+    calibration[i].voltage_scale = 1.0;
+    calibration[i].current_offset = 0.0;
+    calibration[i].current_scale = 1.0;
+    calibration[i].divider_ratio = DIVIDER_6S_RATIO;
+  }
+  
+  Serial.println("🔄 Impostazioni di calibrazione ripristinate ai valori di default");
+}
 
 // ============================================================================
 // FUNZIONI UTILITY
@@ -255,6 +316,9 @@ void simpleCalibration(int battery_index, float measured_voltage, float measured
   Serial.printf("🔧 Calibrazione semplice batteria %d:\n", battery_index);
   Serial.printf("   Tensione: %.2fV -> Divider ratio: %.2f\n", measured_voltage, calibration[battery_index].divider_ratio);
   Serial.printf("   Corrente: %.2fA -> Scale factor: %.3f\n", measured_current, calibration[battery_index].current_scale);
+  
+  // Salva le impostazioni nella memoria flash
+  saveCalibrationToFlash();
 }
 
 // Calibrazione a due punti per maggiore precisione
@@ -285,6 +349,9 @@ void twoPointCalibration(int battery_index, float v1_measured, float v1_raw, flo
   Serial.printf("🔧 Calibrazione a due punti batteria %d:\n", battery_index);
   Serial.printf("   Tensione: Scale=%.3f, Offset=%.3f\n", calibration[battery_index].voltage_scale, calibration[battery_index].voltage_offset);
   Serial.printf("   Corrente: Scale=%.3f, Offset=%.3f\n", calibration[battery_index].current_scale, calibration[battery_index].current_offset);
+  
+  // Salva le impostazioni nella memoria flash
+  saveCalibrationToFlash();
 }
 
 // Inizializza grafico ottimizzato
@@ -346,29 +413,17 @@ void updateCharts() {
   if (millis() - last_chart_update < 1000) return; // Aggiorna ogni 1 secondo
   
   for (int i = 0; i < 3; i++) {
-    // Aggiungi dati reali o di test
-    float test_voltage = batteries[i].voltage;
-    float test_current = batteries[i].current;
-    float test_raw_voltage = batteries[i].raw_voltage_voltage;
-    float test_raw_current = batteries[i].raw_current_voltage;
+    // Usa SOLO i dati reali delle batterie
+    float real_voltage = batteries[i].voltage;
+    float real_current = batteries[i].current;
+    float real_raw_voltage = batteries[i].raw_voltage_voltage;
+    float real_raw_current = batteries[i].raw_current_voltage;
     
-    // Se i dati sono zero, aggiungi dati di test per verificare i grafici
-    if (test_voltage < 0.1) {
-      test_voltage = 20.0 + i * 2.0 + sin(millis() / 1000.0 + i) * 2.0;
-      test_raw_voltage = 2.4 + i * 0.2 + sin(millis() / 1000.0 + i) * 0.2;
-    }
-    if (test_current < 0.1) {
-      test_current = 5.0 + i * 1.0 + cos(millis() / 2000.0 + i) * 1.5;
-      test_raw_current = 2.5 + i * 0.1 + cos(millis() / 2000.0 + i) * 0.1;
-    }
-    
-    // Aggiungi dati convertiti
-    addToChart(&voltage_charts[i], test_voltage);
-    addToChart(&current_charts[i], test_current);
-    
-    // Aggiungi dati raw
-    addToChart(&raw_voltage_charts[i], test_raw_voltage);
-    addToChart(&raw_current_charts[i], test_raw_current);
+    // Aggiungi SOLO dati reali ai grafici
+    addToChart(&voltage_charts[i], real_voltage);
+    addToChart(&current_charts[i], real_current);
+    addToChart(&raw_voltage_charts[i], real_raw_voltage);
+    addToChart(&raw_current_charts[i], real_raw_current);
   }
   
   // Aggiungi dati motori PWM
@@ -397,6 +452,47 @@ void getChartStats(ChartData* chart, float* min_val, float* max_val, float* avg_
   *min_val = chart->min_value;
   *max_val = chart->max_value;
   *avg_val = chart->avg_value;
+}
+
+// Azzera tutti i grafici
+void clearAllCharts() {
+  for (int i = 0; i < 3; i++) {
+    initChart(&voltage_charts[i]);
+    initChart(&current_charts[i]);
+    initChart(&raw_voltage_charts[i]);
+    initChart(&raw_current_charts[i]);
+    initChart(&motor_charts[i]);
+  }
+  Serial.println("🗑️ Tutti i grafici sono stati azzerati");
+}
+
+// Calibrazione automatica basata sui dati raw attuali
+void autoCalibration(int battery_index, float raw_voltage, float raw_current, float measured_voltage, float measured_current) {
+  // Calibrazione tensione: V_measured = (V_raw * divider_ratio + offset) * scale
+  // Assumendo offset = 0, calcoliamo divider_ratio e scale
+  if (raw_voltage > 0.01) {
+    calibration[battery_index].divider_ratio = measured_voltage / raw_voltage;
+    calibration[battery_index].voltage_offset = 0.0;
+    calibration[battery_index].voltage_scale = 1.0;
+  }
+  
+  // Calibrazione corrente: I_measured = ((V_raw - V_ref) / sensitivity + offset) * scale
+  // Assumendo offset = 0, calcoliamo la sensitivity corretta
+  float voltage_diff = raw_current - ACS758_VREF;
+  if (abs(voltage_diff) > 0.01) {
+    float calculated_sensitivity = voltage_diff / measured_current;
+    calibration[battery_index].current_offset = 0.0;
+    calibration[battery_index].current_scale = ACS758_SENSITIVITY / calculated_sensitivity;
+  }
+  
+  Serial.printf("🔄 Calibrazione automatica batteria %d completata:\n", battery_index);
+  Serial.printf("   Tensione: %.3fV raw -> %.2fV misurato (ratio: %.3f)\n", 
+                raw_voltage, measured_voltage, calibration[battery_index].divider_ratio);
+  Serial.printf("   Corrente: %.3fV raw -> %.2fA misurato (scale: %.3f)\n", 
+                raw_current, measured_current, calibration[battery_index].current_scale);
+  
+  // Salva le impostazioni nella memoria flash
+  saveCalibrationToFlash();
 }
 
 // ============================================================================
@@ -518,6 +614,13 @@ void handleCalibration() {
       float measured_voltage = doc["measured_voltage"];
       float measured_current = doc["measured_current"];
       simpleCalibration(battery_index, measured_voltage, measured_current);
+    } else if (mode == "auto") {
+      // Modalità automatica: calibrazione basata sui dati raw attuali
+      float raw_voltage = doc["raw_voltage"];
+      float raw_current = doc["raw_current"];
+      float measured_voltage = doc["measured_voltage"];
+      float measured_current = doc["measured_current"];
+      autoCalibration(battery_index, raw_voltage, raw_current, measured_voltage, measured_current);
     } else if (mode == "two_point") {
       // Modalità a due punti
       float v1_measured = doc["v1_measured"];
@@ -540,9 +643,12 @@ void handleCalibration() {
       calibration[battery_index].current_offset = doc["offset"];
       calibration[battery_index].current_scale = doc["scale"];
       }
+      
+      // Salva le impostazioni nella memoria flash per modalità avanzata
+      saveCalibrationToFlash();
     }
     
-    server.send(200, "application/json", "{\"status\":\"ok\"}");
+    server.send(200, "application/json", "{\"status\":\"ok\",\"message\":\"Calibrazione salvata\"}");
   } else {
     // Restituisci dati di taratura attuali + dati raw correnti
     DynamicJsonDocument doc(2048);
@@ -656,6 +762,17 @@ void handleCharts() {
     }
   }
   
+  // Dati reali attuali delle batterie
+  JsonArray currentBatteries = doc.createNestedArray("current_batteries");
+  for (int i = 0; i < 3; i++) {
+    JsonObject battery = currentBatteries.createNestedObject();
+    battery["voltage"] = batteries[i].voltage;
+    battery["current"] = batteries[i].current;
+    battery["power"] = batteries[i].power;
+    battery["raw_voltage"] = batteries[i].raw_voltage_voltage;
+    battery["raw_current"] = batteries[i].raw_current_voltage;
+  }
+  
   // Metadati
   doc["scale"] = scale;
   doc["points"] = points;
@@ -703,6 +820,24 @@ void handleCSV() {
   server.sendHeader("Content-Type", "text/csv");
   server.sendHeader("Content-Disposition", "attachment; filename=battery_data_complete.csv");
   server.send(200, "text/csv", csv);
+}
+
+void handleClearCharts() {
+  if (server.method() == HTTP_POST) {
+    clearAllCharts();
+    server.send(200, "application/json", "{\"status\":\"ok\",\"message\":\"Grafici azzerati\"}");
+  } else {
+    server.send(405, "application/json", "{\"status\":\"error\",\"message\":\"Metodo non consentito\"}");
+  }
+}
+
+void handleResetCalibration() {
+  if (server.method() == HTTP_POST) {
+    resetCalibrationToDefault();
+    server.send(200, "application/json", "{\"status\":\"ok\",\"message\":\"Calibrazione ripristinata ai valori di default\"}");
+  } else {
+    server.send(405, "application/json", "{\"status\":\"error\",\"message\":\"Metodo non consentito\"}");
+  }
 }
 
 void handleRoot() {
@@ -793,6 +928,8 @@ void handleCalibrationPage() {
     html += "<input type='number' id='measC" + String(i) + "' step='0.01' placeholder='es. 5.2'>";
     html += "</div>";
     html += "<button onclick='saveSimpleCal(" + String(i) + ")'>💾 Calibra Semplice</button>";
+    html += "<button onclick='autoCalibrate(" + String(i) + ")' style='background:#10b981;color:white;margin-left:10px'>🔄 Calibra Auto</button>";
+    html += "<button onclick='resetCalibration()' style='background:#ef4444;color:white;margin-left:10px'>🔄 Reset Calibrazione</button>";
     html += "</div>";
     
     // Modalità due punti
@@ -914,8 +1051,46 @@ void handleCalibrationPage() {
   html += ".catch(e=>alert('Errore: '+e));";
   html += "}";
   html += "";
-  html += "// Aggiorna dati ogni 2 secondi";
-  html += "setInterval(loadCalibrationData,2000);";
+  html += "function autoCalibrate(b){";
+  html += "if(!confirm('Calibrazione automatica: il sistema calcolerà i coefficienti basandosi sui dati raw attuali. Continuare?'))return;";
+  html += "var bat='battery_'+b;";
+  html += "if(!calibrationData[bat]){alert('Dati non disponibili');return;}";
+  html += "var rawV=calibrationData[bat].current_raw_voltage;";
+  html += "var rawC=calibrationData[bat].current_raw_current_voltage;";
+  html += "var measV=calibrationData[bat].current_measured_voltage;";
+  html += "var measC=calibrationData[bat].current_measured_current;";
+  html += "if(rawV<0.1||rawC<0.1){alert('Dati raw insufficienti per calibrazione');return;}";
+  html += "fetch('/calibration',{method:'POST',headers:{'Content-Type':'application/json'},";
+  html += "body:JSON.stringify({battery:b,mode:'auto',raw_voltage:rawV,raw_current:rawC,measured_voltage:measV,measured_current:measC})})";
+  html += ".then(function(r){return r.json();})";
+  html += ".then(function(d){";
+  html += "if(d.status==='ok'){";
+  html += "alert('Calibrazione automatica completata!\\nNuovi coefficienti calcolati e salvati.');";
+  html += "loadCalibrationData();";
+  html += "}else{";
+  html += "alert('Errore durante la calibrazione: '+d.message);";
+  html += "}";
+  html += "})";
+  html += ".catch(function(e){alert('Errore: '+e);});";
+  html += "}";
+  html += "";
+  html += "function resetCalibration(){";
+  html += "if(!confirm('ATTENZIONE: Questo ripristinerà TUTTE le impostazioni di calibrazione ai valori di default. Continuare?'))return;";
+  html += "fetch('/reset-calibration',{method:'POST'})";
+  html += ".then(function(r){return r.json();})";
+  html += ".then(function(d){";
+  html += "if(d.status==='ok'){";
+  html += "alert('Calibrazione ripristinata ai valori di default!\\nLe impostazioni sono state salvate permanentemente.');";
+  html += "loadCalibrationData();";
+  html += "}else{";
+  html += "alert('Errore durante il reset: '+d.message);";
+  html += "}";
+  html += "})";
+  html += ".catch(function(e){alert('Errore: '+e);});";
+  html += "}";
+  html += "";
+  html += "// Aggiorna dati ogni 500ms per calibrazione in tempo reale";
+  html += "setInterval(loadCalibrationData,500);";
   html += "loadCalibrationData();";
   html += "</script></body></html>";
   server.send(200, "text/html", html);
@@ -961,6 +1136,7 @@ void handleChartsPage() {
   html += "<button onclick='toggleAutoUpdate()'>⏸️ Auto</button>";
   html += "<button onclick='resetZoom()'>🔍 Reset Zoom</button>";
   html += "<button onclick='toggleGrid()'>📐 Griglia</button>";
+  html += "<button onclick='clearCharts()' style='background:#ef4444;color:white'>🗑️ Azzera Dati</button>";
   html += "</div>";
   
   html += "<div class='card'><h3>📊 Tensioni (V)</h3>";
@@ -1021,10 +1197,7 @@ void handleChartsPage() {
   html += "let vCtx,cCtx,rvCtx,rcCtx,mCtx;";
   html += "let colors=['#3b82f6','#10b981','#f59e0b'];";
   html += "let names=['6S#1','6S#2','4S'];";
-  html += "let motorNames=['Right','Left','Under'];";
   html += "let showGrid=true;";
-  html += "let zoomLevel=1;";
-  html += "let panOffset=0;";
   html += "";
   html += "function initCharts(){";
   html += "vCtx=document.getElementById('vChart').getContext('2d');";
@@ -1034,79 +1207,141 @@ void handleChartsPage() {
   html += "mCtx=document.getElementById('mChart').getContext('2d');";
   html += "}";
   html += "";
-  html += "function changeScale(){currentScale=document.getElementById('timeScale').value;resetZoom();update();}";
-  html += "function toggleAutoUpdate(){autoUpdate=!autoUpdate;document.querySelector('button[onclick=\"toggleAutoUpdate()\"]').textContent=autoUpdate?'⏸️ Auto':'▶️ Auto';}";
-  html += "function resetZoom(){zoomLevel=1;panOffset=0;update();}";
-  html += "function toggleGrid(){showGrid=!showGrid;update();}";
+  html += "function changeScale(){";
+  html += "currentScale=document.getElementById('timeScale').value;";
+  html += "update();";
+  html += "}";
+  html += "";
+  html += "function toggleAutoUpdate(){";
+  html += "autoUpdate=!autoUpdate;";
+  html += "var btn=document.querySelector('button[onclick=\"toggleAutoUpdate()\"]');";
+  html += "btn.textContent=autoUpdate?'⏸️ Auto':'▶️ Auto';";
+  html += "}";
+  html += "";
+  html += "function resetZoom(){";
+  html += "update();";
+  html += "}";
+  html += "";
+  html += "function toggleGrid(){";
+  html += "showGrid=!showGrid;";
+  html += "update();";
+  html += "}";
   html += "";
   html += "function update(){";
   html += "fetch('/charts-data?scale='+currentScale)";
-  html += ".then(r=>r.json())";
-  html += ".then(d=>{";
+  html += ".then(function(r){return r.json();})";
+  html += ".then(function(d){";
+  html += "if(d){";
   html += "updateTable(d);";
   html += "updateStats(d);";
-  html += "drawChart(vCtx,d.voltage,'Tensioni (V)');";
-  html += "drawChart(cCtx,d.current,'Correnti (A)');";
-  html += "drawChart(rvCtx,d.raw_voltage,'Dati Raw Tensione (V)');";
-  html += "drawChart(rcCtx,d.raw_current,'Dati Raw Corrente (V)');";
-  html += "drawChart(mCtx,d.motors,'Input Motori PWM (μs)');";
+  html += "drawChart(vCtx,d.voltage || [],'voltage');";
+  html += "drawChart(cCtx,d.current || [],'current');";
+  html += "drawChart(rvCtx,d.raw_voltage || [],'raw');";
+  html += "drawChart(rcCtx,d.raw_current || [],'raw');";
+  html += "drawChart(mCtx,d.motors || [],'motor');";
+  html += "}";
   html += "})";
-  html += ".catch(e=>console.error('Errore:',e));";
+  html += ".catch(function(e){console.error('Errore:',e);});";
   html += "}";
   html += "";
   html += "function updateTable(d){";
-  html += "for(let i=0;i<3;i++){";
-  html += "document.getElementById('v'+i).textContent=d.voltage[i].length>0?d.voltage[i][d.voltage[i].length-1].toFixed(2):'N/A';";
-  html += "document.getElementById('c'+i).textContent=d.current[i].length>0?d.current[i][d.current[i].length-1].toFixed(2):'N/A';";
+  html += "for(var i=0;i<3;i++){";
+  html += "if(d.current_batteries && d.current_batteries[i]){";
+  html += "var bat=d.current_batteries[i];";
+  html += "document.getElementById('v'+i).textContent=bat.voltage.toFixed(2);";
+  html += "document.getElementById('c'+i).textContent=bat.current.toFixed(2);";
+  html += "if(d.voltage_stats && d.voltage_stats[i]){";
   html += "document.getElementById('p'+i).textContent=d.voltage_stats[i].samples;";
+  html += "}else{";
+  html += "document.getElementById('p'+i).textContent='0';";
+  html += "}";
+  html += "}else{";
+  html += "document.getElementById('v'+i).textContent='N/A';";
+  html += "document.getElementById('c'+i).textContent='N/A';";
+  html += "document.getElementById('p'+i).textContent='0';";
+  html += "}";
+  html += "if(d.voltage_stats && d.voltage_stats[i] && d.voltage_stats[i].samples>0){";
   html += "document.getElementById('min'+i).textContent=d.voltage_stats[i].min.toFixed(2);";
   html += "document.getElementById('max'+i).textContent=d.voltage_stats[i].max.toFixed(2);";
   html += "document.getElementById('avg'+i).textContent=d.voltage_stats[i].avg.toFixed(2);";
+  html += "}else{";
+  html += "document.getElementById('min'+i).textContent='N/A';";
+  html += "document.getElementById('max'+i).textContent='N/A';";
+  html += "document.getElementById('avg'+i).textContent='N/A';";
+  html += "}";
   html += "}";
   html += "}";
   html += "";
   html += "function updateStats(d){";
-  html += "let html='';";
-  html += "for(let i=0;i<3;i++){";
+  html += "var html='';";
+  html += "for(var i=0;i<3;i++){";
   html += "html+='<div class=\"stat-card\">';";
   html += "html+='<div class=\"stat-value\">'+names[i]+'</div>';";
-  html += "html+='<div class=\"stat-label\">Tensione: '+d.voltage_stats[i].avg.toFixed(2)+'V</div>';";
-  html += "html+='<div class=\"stat-label\">Corrente: '+d.current_stats[i].avg.toFixed(2)+'A</div>';";
-  html += "html+='<div class=\"stat-label\">Campioni: '+d.voltage_stats[i].samples+'</div>';";
+  html += "if(d.current_batteries && d.current_batteries[i]){";
+  html += "var bat=d.current_batteries[i];";
+  html += "html+='<div class=\"stat-label\">Tensione: '+bat.voltage.toFixed(2)+'V</div>';";
+  html += "html+='<div class=\"stat-label\">Corrente: '+bat.current.toFixed(2)+'A</div>';";
+  html += "html+='<div class=\"stat-label\">Potenza: '+bat.power.toFixed(1)+'W</div>';";
+  html += "}else{";
+  html += "html+='<div class=\"stat-label\">Tensione: N/A</div>';";
+  html += "html+='<div class=\"stat-label\">Corrente: N/A</div>';";
+  html += "html+='<div class=\"stat-label\">Potenza: N/A</div>';";
+  html += "}";
   html += "html+='</div>';";
   html += "}";
-  html += "document.getElementById('stats').innerHTML=html;";
+  html += "var statsEl=document.getElementById('stats');";
+  html += "if(statsEl){";
+  html += "statsEl.innerHTML=html;";
+  html += "}";
   html += "}";
   html += "";
-  html += "function drawChart(ctx,data,title){";
-  html += "let canvas=ctx.canvas;";
-  html += "let width=canvas.width=canvas.offsetWidth;";
-  html += "let height=canvas.height=canvas.offsetHeight;";
+  html += "function drawChart(ctx,data,chartType){";
+  html += "var canvas=ctx.canvas;";
+  html += "var width=canvas.width=canvas.offsetWidth;";
+  html += "var height=canvas.height=canvas.offsetHeight;";
   html += "ctx.clearRect(0,0,width,height);";
   html += "";
-  html += "// Trova min/max per scaling";
-  html += "let allValues=[];";
-  html += "data.forEach(arr=>allValues.push(...arr));";
-  html += "if(allValues.length===0)return;";
-  html += "let min=Math.min(...allValues);";
-  html += "let max=Math.max(...allValues);";
-  html += "let range=max-min;";
+  html += "var min,max,range;";
+  html += "if(chartType==='voltage'){";
+  html += "min=0;max=40;range=40;";
+  html += "}else if(chartType==='current'){";
+  html += "min=-30;max=30;range=60;";
+  html += "}else{";
+  html += "var allValues=[];";
+  html += "for(var i=0;i<data.length;i++){";
+  html += "for(var j=0;j<data[i].length;j++){";
+  html += "allValues.push(data[i][j]);";
+  html += "}";
+  html += "}";
+  html += "if(allValues.length===0){";
+  html += "ctx.fillStyle='#94a3b8';";
+  html += "ctx.font='16px Arial';";
+  html += "ctx.textAlign='center';";
+  html += "ctx.fillText('Nessun dato disponibile',width/2,height/2);";
+  html += "return;";
+  html += "}";
+  html += "min=Math.min.apply(Math,allValues);";
+  html += "max=Math.max.apply(Math,allValues);";
+  html += "range=max-min;";
   html += "if(range===0)range=1;";
+  html += "}";
   html += "";
- "// Disegna griglia";
   html += "if(showGrid){";
   html += "ctx.strokeStyle='#1f2937';";
   html += "ctx.lineWidth=1;";
-  html += "for(let i=0;i<=10;i++){";
-  html += "let y=height-(i*height/10);";
+  html += "ctx.fillStyle='#94a3b8';";
+  html += "ctx.font='10px Arial';";
+  html += "for(var i=0;i<=10;i++){";
+  html += "var y=height-(i*height/10);";
   html += "ctx.beginPath();";
   html += "ctx.moveTo(0,y);";
   html += "ctx.lineTo(width,y);";
   html += "ctx.stroke();";
+  html += "var value=min+(i*(max-min)/10);";
+  html += "ctx.fillText(value.toFixed(1),5,y-2);";
   html += "}";
-  html += "// Linee verticali";
-  html += "for(let i=0;i<=20;i++){";
-  html += "let x=(i*width/20);";
+  html += "for(var i=0;i<=20;i++){";
+  html += "var x=(i*width/20);";
   html += "ctx.beginPath();";
   html += "ctx.moveTo(x,0);";
   html += "ctx.lineTo(x,height);";
@@ -1114,57 +1349,72 @@ void handleChartsPage() {
   html += "}";
   html += "}";
   html += "";
-  html += "// Disegna linee";
-  html += "data.forEach((values,i)=>{";
-  html += "if(values.length<2)return;";
-  html += "ctx.strokeStyle=colors[i];";
+  html += "if(chartType==='current'){";
+  html += "ctx.strokeStyle='#ef4444';";
+  html += "ctx.lineWidth=1;";
+  html += "ctx.setLineDash([5,5]);";
+  html += "var zeroY=height-((0-min)/range)*height;";
+  html += "ctx.beginPath();";
+  html += "ctx.moveTo(0,zeroY);";
+  html += "ctx.lineTo(width,zeroY);";
+  html += "ctx.stroke();";
+  html += "ctx.setLineDash([]);";
+  html += "}";
+  html += "";
+  html += "if(chartType==='voltage'){";
+  html += "ctx.strokeStyle='#10b981';";
+  html += "ctx.lineWidth=1;";
+  html += "ctx.setLineDash([5,5]);";
+  html += "var nominalY=height-((24-min)/range)*height;";
+  html += "ctx.beginPath();";
+  html += "ctx.moveTo(0,nominalY);";
+  html += "ctx.lineTo(width,nominalY);";
+  html += "ctx.stroke();";
+  html += "ctx.setLineDash([]);";
+  html += "}";
+  html += "";
+  html += "if(data && data.length>0){";
+  html += "for(var i=0;i<data.length;i++){";
+  html += "if(!data[i] || data[i].length<2)continue;";
+  html += "var values=data[i];";
+  html += "ctx.strokeStyle=colors[i] || '#3b82f6';";
   html += "ctx.lineWidth=2;";
   html += "ctx.beginPath();";
-  html += "values.forEach((val,j)=>{";
-  html += "let x=(j/(values.length-1))*width;";
-  html += "let y=height-((val-min)/range)*height;";
+  html += "for(var j=0;j<values.length;j++){";
+  html += "var x=(j/(values.length-1))*width;";
+  html += "var y=height-((values[j]-min)/range)*height;";
   html += "if(j===0)ctx.moveTo(x,y);";
   html += "else ctx.lineTo(x,y);";
-  html += "});";
+  html += "}";
   html += "ctx.stroke();";
-  html += "});";
+  html += "}";
+  html += "}";
   html += "}";
   html += "";
-  html += "function exportCSV(){window.open('/csv','_blank');}";
+  html += "function exportCSV(){";
+  html += "window.open('/csv','_blank');";
+  html += "}";
   html += "";
-  html += "// Eventi mouse per zoom e pan";
-  html += "function addChartEvents(canvas,ctx){";
-  html += "let isDragging=false;";
-  html += "let lastX=0;";
-  html += "canvas.addEventListener('mousedown',(e)=>{isDragging=true;lastX=e.clientX;});";
-  html += "canvas.addEventListener('mousemove',(e)=>{";
-  html += "if(isDragging){";
-  html += "let deltaX=e.clientX-lastX;";
-  html += "panOffset+=deltaX*0.01;";
-  html += "lastX=e.clientX;";
+  html += "function clearCharts(){";
+  html += "if(confirm('Sei sicuro di voler azzerare tutti i dati storici?')){";
+  html += "fetch('/clear-charts',{method:'POST'})";
+  html += ".then(function(r){return r.json();})";
+  html += ".then(function(d){";
+  html += "if(d.status==='ok'){";
+  html += "alert('Dati azzerati con successo!');";
   html += "update();";
+  html += "}else{";
+  html += "alert('Errore durante l\\'azzeramento');";
   html += "}";
-  html += "});";
-  html += "canvas.addEventListener('mouseup',()=>{isDragging=false;});";
-  html += "canvas.addEventListener('wheel',(e)=>{";
-  html += "e.preventDefault();";
-  html += "let delta=e.deltaY>0?0.9:1.1;";
-  html += "zoomLevel*=delta;";
-  html += "zoomLevel=Math.max(0.1,Math.min(5,zoomLevel));";
-  html += "update();";
-  html += "});";
+  html += "})";
+  html += ".catch(function(e){alert('Errore: '+e);});";
+  html += "}";
   html += "}";
   html += "";
-  html += "// Inizializzazione";
   html += "window.onload=function(){";
   html += "initCharts();";
-  html += "addChartEvents(document.getElementById('vChart'),vCtx);";
-  html += "addChartEvents(document.getElementById('cChart'),cCtx);";
-  html += "addChartEvents(document.getElementById('rvChart'),rvCtx);";
-  html += "addChartEvents(document.getElementById('rcChart'),rcCtx);";
-  html += "addChartEvents(document.getElementById('mChart'),mCtx);";
   html += "update();";
-  html += "setInterval(()=>{if(autoUpdate)update();},5000);";
+  html += "setInterval(function(){if(autoUpdate)update();},5000);";
   html += "};";
   html += "</script></body></html>";
   server.send(200, "text/html", html);
@@ -1228,6 +1478,9 @@ void setup() {
   // Inizializzazione Taratura
   initCalibration();
   
+  // Carica le impostazioni di calibrazione salvate dalla memoria flash
+  loadCalibrationFromFlash();
+  
   // Inizializzazione Grafici
   for (int i = 0; i < 3; i++) {
     initChart(&voltage_charts[i]);
@@ -1260,6 +1513,8 @@ void setup() {
   server.on("/calibration", HTTP_POST, handleCalibration);
   server.on("/charts", HTTP_GET, handleChartsPage);
   server.on("/charts-data", HTTP_GET, handleCharts);
+  server.on("/clear-charts", HTTP_POST, handleClearCharts);
+  server.on("/reset-calibration", HTTP_POST, handleResetCalibration);
   server.on("/csv", handleCSV);
   server.begin();
   Serial.println("🌍 Web Server avviato");
