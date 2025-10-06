@@ -520,8 +520,9 @@ void readAutopilotInput() {
   autopilot_input.motor_right = readPWM(PWM_IN_RIGHT);
   autopilot_input.motor_left = readPWM(PWM_IN_LEFT);
   autopilot_input.motor_under = readPWM(PWM_IN_UNDER);
-  autopilot_input.dir_right = digitalRead(DIR_RIGHT_PIN);
-  autopilot_input.dir_left = digitalRead(DIR_LEFT_PIN);
+  // RIMOSSO: I pin di direzione sono OUTPUT, non INPUT!
+  // autopilot_input.dir_right = digitalRead(DIR_RIGHT_PIN);  // ❌ ERRORE
+  // autopilot_input.dir_left = digitalRead(DIR_LEFT_PIN);    // ❌ ERRORE
 }
 
 void calculateMotorOutput() {
@@ -535,8 +536,7 @@ void calculateMotorOutput() {
   // Per motore destro
   if (right_input <= PWM_CENTER) {
     // 1000-1500: BACKWARD - mappa 1000→2000, 1500→1000
-    motor_output.right_pwm = 1000;
-    //motor_output.right_pwm = map(right_input, PWM_MIN, PWM_CENTER, PWM_MAX, PWM_MIN);
+    motor_output.right_pwm = map(right_input, PWM_MIN, PWM_CENTER, PWM_MAX, PWM_MIN);
     digitalWrite(DIR_RIGHT_PIN, LOW);  // BACKWARD - DISATTIVO
     // DEBUG: Stampa quando va indietro
     if (right_input < 1500) {
@@ -555,8 +555,7 @@ void calculateMotorOutput() {
   // Per motore sinistro
   if (left_input <= PWM_CENTER) {
     // 1000-1500: BACKWARD - mappa 1000→2000, 1500→1000
-    motor_output.left_pwm = 1000;
-    //motor_output.left_pwm = map(left_input, PWM_MIN, PWM_CENTER, PWM_MAX, PWM_MIN);
+    motor_output.left_pwm = map(left_input, PWM_MIN, PWM_CENTER, PWM_MAX, PWM_MIN);
     digitalWrite(DIR_LEFT_PIN, LOW);   // BACKWARD - DISATTIVO
     // DEBUG: Stampa quando va indietro
     if (left_input < 1500) {
