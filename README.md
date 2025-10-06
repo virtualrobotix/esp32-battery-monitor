@@ -21,16 +21,17 @@ Sistema completo per monitoraggio batterie e controllo differenziale motori con 
 - **GPIO39** - Tensione 4S (Partitore)
 
 ### PWM Input (Autopilota)
-- **GPIO18** - Throttle (1000-2000μs)
-- **GPIO19** - Steering (1000-2000μs)
+- **GPIO18** - Motore Destro (1000-2000μs)
+- **GPIO19** - Motore Sinistro (1000-2000μs)
+- **GPIO5** - Motori Sottostanti (1000-2000μs)
 
-### Digital Input (Direzione)
-- **GPIO17** - Direzione Motore Sinistro
-- **GPIO21** - Direzione Motore Destro
+### Digital Output (Direzione Motori)
+- **GPIO17** - Direzione Motore Sinistro (OUTPUT)
+- **GPIO21** - Direzione Motore Destro (OUTPUT)
 
 ### PWM Output (Motori)
-- **GPIO22** - Motore Destro (ESC)
-- **GPIO23** - Motore Sinistro (ESC)
+- **GPIO26** - Motore Destro (ESC)
+- **GPIO27** - Motore Sinistro (ESC)
 
 ## 🔧 Circuito Elettronico
 
@@ -48,23 +49,37 @@ Sistema completo per monitoraggio batterie e controllo differenziale motori con 
 ### Filtri e Protezioni
 - **Condensatori**: 100nF su ogni input ADC
 - **Resistenze**: 1kΩ di protezione
-- **Pull-up**: Su input digitali direzione
+- **Pull-up**: Su input digitali (se necessari)
 
-## 📊 Algoritmo Controllo Differenziale
+## 📊 Algoritmo Controllo Motori
 
+### Logica PWM e Direzione
 ```cpp
-// Calcolo velocità base
-throttle_factor = (throttle - 1500) / 500
+// Input dall'autopilota: 1000-2000μs
+// 1500μs = neutro
 
-// Calcolo differenziale
-right_speed = throttle_factor + (steering_factor * 0.5)
-left_speed = throttle_factor - (steering_factor * 0.5)
+// Direzione AVANTI (1500-2000μs)
+if (input > 1500) {
+    pwm_output = map(input, 1500, 2000, 1000, 2000);
+    direction_pin = HIGH;  // ATTIVO
+}
 
-// Applicazione direzione
-if (direction == REVERSE) {
-    pwm = 3000 - pwm
+// Direzione INDIETRO (1000-1500μs)  
+if (input <= 1500) {
+    pwm_output = map(input, 1000, 1500, 2000, 1000);
+    direction_pin = LOW;   // DISATTIVO
 }
 ```
+
+### Mappatura PWM
+| Input Autopilota | Range | DIR_PIN | PWM Output | Comportamento |
+|------------------|-------|---------|------------|---------------|
+| 2000μs | 1500-2000 | **HIGH** | 2000μs | Avanti massimo |
+| 1750μs | 1500-2000 | **HIGH** | 1500μs | Avanti medio |
+| 1500μs | 1500-2000 | **HIGH** | 1000μs | Neutro (avanti) |
+| 1500μs | 1000-1500 | **LOW** | 1000μs | Neutro (indietro) |
+| 1250μs | 1000-1500 | **LOW** | 1500μs | Indietro medio |
+| 1000μs | 1000-1500 | **LOW** | 2000μs | Indietro massimo |
 
 ## 🌐 Interfaccia Web
 
@@ -76,6 +91,10 @@ if (direction == REVERSE) {
 ### Endpoints
 - **/** - Dashboard principale
 - **/api** - API JSON per telemetria
+- **/calibration** - Pagina taratura sensori
+- **/charts** - Grafici storici
+- **/charts-data** - Dati grafici JSON
+- **/csv** - Esportazione dati CSV
 
 ### Esempio API Response
 ```json
@@ -86,14 +105,15 @@ if (direction == REVERSE) {
     {"voltage": 16.5, "current": 0.8, "power": 13.2}
   ],
   "autopilot": {
-    "throttle": 1650,
-    "steering": 1500,
+    "motor_right": 1650,
+    "motor_left": 1500,
+    "motor_under": 1500,
     "dir_right": true,
     "dir_left": true
   },
   "motors": {
     "right_pwm": 1650,
-    "left_pwm": 1650
+    "left_pwm": 1500
   },
   "loop_frequency": 125.5,
   "uptime": 45000
@@ -103,10 +123,11 @@ if (direction == REVERSE) {
 ## 🚀 Installazione
 
 ### 1. Hardware
-- Collegare sensori ACS758 ai pin ADC
-- Collegare partitori tensione ai pin ADC
-- Collegare autopilota ai pin PWM/Digital
-- Collegare ESC motori ai pin PWM output
+- Collegare sensori ACS758 ai pin ADC (GPIO32,33,34)
+- Collegare partitori tensione ai pin ADC (GPIO35,36,39)
+- Collegare autopilota ai pin PWM input (GPIO18,19,5)
+- Collegare ESC motori ai pin PWM output (GPIO26,27)
+- Collegare pin direzione motori (GPIO17,21) - OUTPUT
 
 ### 2. Software
 1. Installare ESP32 Board Package in Arduino IDE
@@ -134,6 +155,8 @@ if (direction == REVERSE) {
 - Dati batterie con colori
 - Status sistema completo
 - Auto-refresh ogni secondo
+- Pagina taratura sensori
+- Grafici storici con esportazione CSV
 
 ### API JSON
 - Endpoint `/api` per integrazione
@@ -167,6 +190,8 @@ if (direction == REVERSE) {
 2. **PWM non funziona**: Verificare frequenza ESC
 3. **WiFi non si connette**: Controllare SSID/password
 4. **Correnti errate**: Calibrare sensori ACS758
+5. **Motori non vanno indietro**: Verificare pin direzione (GPIO17,21)
+6. **Pin direzione non funzionano**: Controllare che siano configurati come OUTPUT
 
 ### Debug
 - Abilitare Serial Monitor a 115200 baud
@@ -175,6 +200,16 @@ if (direction == REVERSE) {
 - Usare multimetro per validazione
 
 ## 📝 Changelog
+
+### v1.1.0 (Corrente)
+- ✅ **CORRETTO**: Pin direzione motori (GPIO17,21) ora funzionano correttamente
+- ✅ **CORRETTO**: Logica PWM per direzione avanti/indietro
+- ✅ **AGGIUNTO**: Debug seriale per monitoraggio motori
+- ✅ **AGGIUNTO**: Pagina taratura sensori avanzata
+- ✅ **AGGIUNTO**: Grafici storici con esportazione CSV
+- ✅ **AGGIUNTO**: Motore sottostanti (GPIO5)
+- ✅ **MIGLIORATO**: Algoritmo controllo motori semplificato
+- ✅ **MIGLIORATO**: Pinout aggiornato (GPIO26,27 per PWM output)
 
 ### v1.0.0
 - Implementazione base sistema
