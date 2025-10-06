@@ -220,7 +220,7 @@ if (input <= 1500) {
 
 ## 📄 Licenza
 
-Progetto open source per uso educativo e hobbistico.
+Progetto di supporto al Drone Dirigibile AlixBlimp
 
 ## 🤝 Contributi
 
