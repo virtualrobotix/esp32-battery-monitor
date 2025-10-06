@@ -1,5 +1,5 @@
-  /*
- * ESP32 Battery Monitor & Differential Motor Control
+    /*
+ * AlixBlimp Battery Monitor & Differential Motor Control
  * 
  * Funzionalità:
  * - Monitoraggio corrente/tensione 3 pacchi batterie (2x6S + 1x4S)
@@ -529,29 +529,47 @@ void calculateMotorOutput() {
   uint16_t right_input = autopilot_input.motor_right;
   uint16_t left_input = autopilot_input.motor_left;
   
-  // Mappatura corretta: 1500 = neutro (1000 output)
-  // 1000-1500: mappa a 2000-1000 (inverso), direzione BACKWARD
-  // 1500-2000: mappa a 1000-2000 (normale), direzione FORWARD
+  // Logica corretta PWM:
+  // AVANTI: 1500→1000, 2000→2000 (HIGH)
+  // INDIETRO: 1500→1000, 1000→2000 (LOW)
   // Per motore destro
   if (right_input <= PWM_CENTER) {
-    // 1000-1500: mappa a 2000-1000 (inverso), direzione BACKWARD
-    motor_output.right_pwm = map(right_input, PWM_MIN, PWM_CENTER, PWM_MAX, PWM_MIN);
-    digitalWrite(DIR_RIGHT_PIN, LOW);  // BACKWARD
+    // 1000-1500: BACKWARD - mappa 1000→2000, 1500→1000
+    motor_output.right_pwm = 1000;
+    //motor_output.right_pwm = map(right_input, PWM_MIN, PWM_CENTER, PWM_MAX, PWM_MIN);
+    digitalWrite(DIR_RIGHT_PIN, LOW);  // BACKWARD - DISATTIVO
+    // DEBUG: Stampa quando va indietro
+    if (right_input < 1500) {
+      Serial.printf("🔙 MOTORE DESTRO INDIETRO: Input=%d, Output=%d, DIR=LOW\n", right_input, motor_output.right_pwm);
+    }
   } else {
-    // 1500-2000: mappa a 1000-2000 (normale), direzione FORWARD
+    // 1500-2000: FORWARD - mappa 1500→1000, 2000→2000
     motor_output.right_pwm = map(right_input, PWM_CENTER, PWM_MAX, PWM_MIN, PWM_MAX);
-    digitalWrite(DIR_RIGHT_PIN, HIGH); // FORWARD
+    digitalWrite(DIR_RIGHT_PIN, HIGH); // FORWARD - ATTIVO
+    // DEBUG: Stampa quando va avanti
+    if (right_input > 1500) {
+      Serial.printf("🔜 MOTORE DESTRO AVANTI: Input=%d, Output=%d, DIR=HIGH\n", right_input, motor_output.right_pwm);
+    }
   }
   
   // Per motore sinistro
   if (left_input <= PWM_CENTER) {
-    // 1000-1500: mappa a 2000-1000 (inverso), direzione BACKWARD
-    motor_output.left_pwm = map(left_input, PWM_MIN, PWM_CENTER, PWM_MAX, PWM_MIN);
-    digitalWrite(DIR_LEFT_PIN, LOW);   // BACKWARD
+    // 1000-1500: BACKWARD - mappa 1000→2000, 1500→1000
+    motor_output.left_pwm = 1000;
+    //motor_output.left_pwm = map(left_input, PWM_MIN, PWM_CENTER, PWM_MAX, PWM_MIN);
+    digitalWrite(DIR_LEFT_PIN, LOW);   // BACKWARD - DISATTIVO
+    // DEBUG: Stampa quando va indietro
+    if (left_input < 1500) {
+      Serial.printf("🔙 MOTORE SINISTRO INDIETRO: Input=%d, Output=%d, DIR=LOW\n", left_input, motor_output.left_pwm);
+    }
   } else {
-    // 1500-2000: mappa a 1000-2000 (normale), direzione FORWARD
+    // 1500-2000: FORWARD - mappa 1500→1000, 2000→2000
     motor_output.left_pwm = map(left_input, PWM_CENTER, PWM_MAX, PWM_MIN, PWM_MAX);
-    digitalWrite(DIR_LEFT_PIN, HIGH);  // FORWARD
+    digitalWrite(DIR_LEFT_PIN, HIGH);  // FORWARD - ATTIVO
+    // DEBUG: Stampa quando va avanti
+    if (left_input > 1500) {
+      Serial.printf("🔜 MOTORE SINISTRO AVANTI: Input=%d, Output=%d, DIR=HIGH\n", left_input, motor_output.left_pwm);
+    }
   }
   
   // Limitazione finale
@@ -842,7 +860,7 @@ void handleResetCalibration() {
 
 void handleRoot() {
   String html = "<!DOCTYPE html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>";
-  html += "<title>ESP32 Battery Monitor</title>";
+  html += "<title>Alix Blimp Battery Monitor</title>";
   html += "<style>";
   html += "*{box-sizing:border-box}body{margin:0;padding:16px;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;background:#0b1220;color:#e6edf3}";
   html += ".container{max-width:1000px;margin:0 auto}";
@@ -858,7 +876,7 @@ void handleRoot() {
   html += ".footer{margin-top:14px;font-size:12px;color:#94a3b8}";
   html += "a{color:#60a5fa;text-decoration:none}";
   html += "</style></head><body><div class='container'>";
-  html += "<h1>🔋 ESP32 Battery Monitor - TEST</h1>";
+  html += "<h1>🔋 Alix Blimp Battery Monitor - TEST</h1>";
   html += "<div class='grid'>";
   html += "<div class='card' id='b0'><h3>6S Battery #1</h3><div class='row'><span class='muted'>Tensione</span><strong><span id='b0v'>-</span> V</strong></div><div class='row'><span class='muted'>Corrente</span><strong><span id='b0c'>-</span> A</strong></div><div class='row'><span class='muted'>Potenza</span><strong><span id='b0p'>-</span> W</strong></div></div>";
   html += "<div class='card' id='b1'><h3>6S Battery #2</h3><div class='row'><span class='muted'>Tensione</span><strong><span id='b1v'>-</span> V</strong></div><div class='row'><span class='muted'>Corrente</span><strong><span id='b1c'>-</span> A</strong></div><div class='row'><span class='muted'>Potenza</span><strong><span id='b1p'>-</span> W</strong></div></div>";
@@ -1460,7 +1478,7 @@ void handleAPI() {
 
 void setup() {
   Serial.begin(115200);
-  Serial.println("🚀 ESP32 Battery Monitor & Motor Control");
+  Serial.println("🚀 AlixBlimp Battery Monitor & Motor Control");
   Serial.println("========================================");
   
   // Configurazione Pin
