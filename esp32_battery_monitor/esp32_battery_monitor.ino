@@ -60,8 +60,8 @@
 #define ACS758_VREF        2.5   // Tensione di riferimento (VCC/2)
 
 // Parametri Partitori Tensione
-#define DIVIDER_6S_RATIO   8.4   // 25.2V -> 3.0V
-#define DIVIDER_4S_RATIO   5.6   // 16.8V -> 3.0V
+#define DIVIDER_6S_RATIO   11   // 33.6V -> 3.05V
+#define DIVIDER_4S_RATIO   11   // 12.6V -> 1.15V
 
 // Parametri PWM
 #define PWM_FREQ           50    // 50Hz per ESC/Servo
