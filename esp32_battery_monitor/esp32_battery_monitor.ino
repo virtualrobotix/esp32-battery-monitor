@@ -77,8 +77,10 @@
 // ============================================================================
 // CONFIGURAZIONE LEDC CHANNELS
 // ============================================================================
-#define PWM_OUT_RIGHT_CHANNEL  0    // LEDC Channel 0
-#define PWM_OUT_LEFT_CHANNEL   1    // LEDC Channel 1
+#define PWM_OUT_RIGHT_CHANNEL  0    // LEDC Channel 0 - PWM Motore Destro
+#define PWM_OUT_LEFT_CHANNEL   1    // LEDC Channel 1 - PWM Motore Sinistro
+#define DIR_RIGHT_CHANNEL      2    // LEDC Channel 2 - Direzione Motore Destro
+#define DIR_LEFT_CHANNEL       3    // LEDC Channel 3 - Direzione Motore Sinistro
 
 // ============================================================================
 // VARIABILI GLOBALI
@@ -283,6 +285,19 @@ void writePWM(int pin, uint16_t pulse_width) {
     ledcWrite(PWM_OUT_RIGHT_CHANNEL, duty);
   } else if (pin == PWM_OUT_LEFT) {
     ledcWrite(PWM_OUT_LEFT_CHANNEL, duty);
+  }
+}
+
+// Scrittura PWM per pin di direzione
+void writeDirPWM(int pin, bool active) {
+  // Se attivo: PWM a 1500μs, se disattivo: PWM a 1000μs (o 0)
+  uint16_t pulse_width = active ? 1500 : 1000;
+  uint16_t duty = (pulse_width * 4095) / 20000;
+  
+  if (pin == DIR_RIGHT_PIN) {
+    ledcWrite(DIR_RIGHT_CHANNEL, duty);
+  } else if (pin == DIR_LEFT_PIN) {
+    ledcWrite(DIR_LEFT_CHANNEL, duty);
   }
 }
 
@@ -531,24 +546,24 @@ void calculateMotorOutput() {
   uint16_t left_input = autopilot_input.motor_left;
   
   // Logica corretta PWM:
-  // AVANTI: 1500→1000, 2000→2000 (HIGH)
-  // INDIETRO: 1500→1000, 1000→2000 (LOW)
+  // AVANTI: 1500→1000, 2000→2000 (PWM ATTIVO)
+  // INDIETRO: 1500→1000, 1000→2000 (PWM DISATTIVO)
   // Per motore destro
   if (right_input <= PWM_CENTER) {
     // 1000-1500: BACKWARD - mappa 1000→2000, 1500→1000
     motor_output.right_pwm = map(right_input, PWM_MIN, PWM_CENTER, PWM_MAX, PWM_MIN);
-    digitalWrite(DIR_RIGHT_PIN, LOW);  // BACKWARD - DISATTIVO
+    writeDirPWM(DIR_RIGHT_PIN, false);  // BACKWARD - PWM DISATTIVO
     // DEBUG: Stampa quando va indietro
     if (right_input < 1500) {
-      Serial.printf("🔙 MOTORE DESTRO INDIETRO: Input=%d, Output=%d, DIR=LOW\n", right_input, motor_output.right_pwm);
+      Serial.printf("🔙 MOTORE DESTRO INDIETRO: Input=%d, Output=%d, DIR=PWM_OFF\n", right_input, motor_output.right_pwm);
     }
   } else {
     // 1500-2000: FORWARD - mappa 1500→1000, 2000→2000
     motor_output.right_pwm = map(right_input, PWM_CENTER, PWM_MAX, PWM_MIN, PWM_MAX);
-    digitalWrite(DIR_RIGHT_PIN, HIGH); // FORWARD - ATTIVO
+    writeDirPWM(DIR_RIGHT_PIN, true);   // FORWARD - PWM ATTIVO
     // DEBUG: Stampa quando va avanti
     if (right_input > 1500) {
-      Serial.printf("🔜 MOTORE DESTRO AVANTI: Input=%d, Output=%d, DIR=HIGH\n", right_input, motor_output.right_pwm);
+      Serial.printf("🔜 MOTORE DESTRO AVANTI: Input=%d, Output=%d, DIR=PWM_ON\n", right_input, motor_output.right_pwm);
     }
   }
   
@@ -556,18 +571,18 @@ void calculateMotorOutput() {
   if (left_input <= PWM_CENTER) {
     // 1000-1500: BACKWARD - mappa 1000→2000, 1500→1000
     motor_output.left_pwm = map(left_input, PWM_MIN, PWM_CENTER, PWM_MAX, PWM_MIN);
-    digitalWrite(DIR_LEFT_PIN, LOW);   // BACKWARD - DISATTIVO
+    writeDirPWM(DIR_LEFT_PIN, false);   // BACKWARD - PWM DISATTIVO
     // DEBUG: Stampa quando va indietro
     if (left_input < 1500) {
-      Serial.printf("🔙 MOTORE SINISTRO INDIETRO: Input=%d, Output=%d, DIR=LOW\n", left_input, motor_output.left_pwm);
+      Serial.printf("🔙 MOTORE SINISTRO INDIETRO: Input=%d, Output=%d, DIR=PWM_OFF\n", left_input, motor_output.left_pwm);
     }
   } else {
     // 1500-2000: FORWARD - mappa 1500→1000, 2000→2000
     motor_output.left_pwm = map(left_input, PWM_CENTER, PWM_MAX, PWM_MIN, PWM_MAX);
-    digitalWrite(DIR_LEFT_PIN, HIGH);  // FORWARD - ATTIVO
+    writeDirPWM(DIR_LEFT_PIN, true);    // FORWARD - PWM ATTIVO
     // DEBUG: Stampa quando va avanti
     if (left_input > 1500) {
-      Serial.printf("🔜 MOTORE SINISTRO AVANTI: Input=%d, Output=%d, DIR=HIGH\n", left_input, motor_output.left_pwm);
+      Serial.printf("🔜 MOTORE SINISTRO AVANTI: Input=%d, Output=%d, DIR=PWM_ON\n", left_input, motor_output.left_pwm);
     }
   }
   
@@ -1480,14 +1495,6 @@ void setup() {
   Serial.println("🚀 AlixBlimp Battery Monitor & Motor Control");
   Serial.println("========================================");
   
-  // Configurazione Pin
-  pinMode(DIR_RIGHT_PIN, OUTPUT);
-  pinMode(DIR_LEFT_PIN, OUTPUT);
-  
-  // Inizializzazione pin direzione (neutral)
-  digitalWrite(DIR_RIGHT_PIN, LOW);
-  digitalWrite(DIR_LEFT_PIN, LOW);
-  
   // Configurazione ADC
   analogReadResolution(12);
   analogSetAttenuation(ADC_11db); // 0-3.3V range
@@ -1507,15 +1514,27 @@ void setup() {
     initChart(&motor_charts[i]);
   }
   
-  // Configurazione PWM Output (LEDC channels) - CORRETTA
+  // Configurazione PWM Output Motori (LEDC channels)
   ledcSetup(PWM_OUT_RIGHT_CHANNEL, PWM_FREQ, 12);  // 50Hz, 12-bit resolution
   ledcAttachPin(PWM_OUT_RIGHT, PWM_OUT_RIGHT_CHANNEL);
   ledcSetup(PWM_OUT_LEFT_CHANNEL, PWM_FREQ, 12);   // 50Hz, 12-bit resolution  
   ledcAttachPin(PWM_OUT_LEFT, PWM_OUT_LEFT_CHANNEL);
   
+  // Configurazione PWM Output Direzione (LEDC channels)
+  ledcSetup(DIR_RIGHT_CHANNEL, PWM_FREQ, 12);      // 50Hz, 12-bit resolution
+  ledcAttachPin(DIR_RIGHT_PIN, DIR_RIGHT_CHANNEL);
+  ledcSetup(DIR_LEFT_CHANNEL, PWM_FREQ, 12);       // 50Hz, 12-bit resolution
+  ledcAttachPin(DIR_LEFT_PIN, DIR_LEFT_CHANNEL);
+  
   // Inizializzazione PWM Output (posizione neutra)
   writePWM(PWM_OUT_RIGHT, PWM_CENTER);
   writePWM(PWM_OUT_LEFT, PWM_CENTER);
+  
+  // Inizializzazione PWM Direzione (disattivi)
+  writeDirPWM(DIR_RIGHT_PIN, false);
+  writeDirPWM(DIR_LEFT_PIN, false);
+  
+  Serial.println("✅ PWM Motori e Direzione configurati");
   
   // WiFi Access Point
   WiFi.softAP(ssid, password);
