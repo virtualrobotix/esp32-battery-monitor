@@ -40,7 +40,7 @@
 
 // Digital Input per Direzione
 #define DIR_RIGHT_PIN      21    // GPIO21 - Direzione Motore Destro
-#define DIR_LEFT_PIN       17    // GPIO17 - Direzione Motore Sinistro
+#define DIR_LEFT_PIN       23    // GPIO23 - Direzione Motore Sinistro
 
 // PWM Output per Motori
 #define PWM_OUT_RIGHT      26    // GPIO25 - Motore Destro
@@ -291,7 +291,7 @@ void writePWM(int pin, uint16_t pulse_width) {
 // Scrittura PWM per pin di direzione
 void writeDirPWM(int pin, bool active) {
   // Se attivo: PWM a 1500μs, se disattivo: PWM a 1000μs (o 0)
-  uint16_t pulse_width = active ? 1500 : 1000;
+  uint16_t pulse_width = active ? 2000 : 1000;
   uint16_t duty = (pulse_width * 4095) / 20000;
   
   if (pin == DIR_RIGHT_PIN) {
