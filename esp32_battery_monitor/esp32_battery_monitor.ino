@@ -18,6 +18,7 @@
 #include <WebServer.h>
 #include <ArduinoJson.h>
 #include <Preferences.h>
+#include <SPIFFS.h>
 
 // ============================================================================
 // CONFIGURAZIONE PIN
@@ -130,7 +131,7 @@ struct CalibrationData {
 
 // Strutture per Grafici (dati storici ottimizzati)
 struct ChartData {
-  float values[300];        // 300 punti (5 minuti a 1Hz) - ridotto per memoria
+  float values[120];        // 120 punti (2 minuti a 1Hz) - ultimi 2 minuti
   int index;                // Indice corrente
   bool filled;              // Buffer riempito
   unsigned long last_update; // Ultimo aggiornamento
@@ -140,6 +141,43 @@ struct ChartData {
   unsigned long total_samples; // Totale campioni raccolti
 };
 
+// Struttura per dati in Flash (salvato ogni 2 minuti, fino a 4 ore)
+struct LogEntry {
+  unsigned long timestamp;  // Timestamp in millisecondi
+  float voltage;            // Tensione
+  float current;            // Corrente
+  float power;              // Potenza
+};
+
+// Buffer RAM (2 minuti @ 1Hz = 120 campioni) - condiviso con grafici
+// Usa direttamente ChartData esistente
+
+// Snapshot temporaneo per salvataggio (1 snapshot = 2 minuti)
+struct FlashLogSnapshot {
+  LogEntry entries[120];    // 120 campioni (2 minuti @ 1Hz)
+  unsigned long timestamp;  // Timestamp dello snapshot
+};
+
+// Metadati log in SPIFFS (solo indici, non i dati)
+struct FlashLog {
+  int snapshot_count;        // Numero di snapshot salvati (max 120)
+  int current_index;         // Indice corrente nel buffer circolare (0-119)
+  unsigned long last_save;   // Ultimo salvataggio in flash
+  bool filled;               // Buffer riempito almeno una volta (≥120 snapshot)
+  bool save_pending;         // Flag: snapshot in coda per salvataggio asincrono
+};
+
+// Buffer per salvataggio asincrono (evita blocchi durante controllo PWM)
+struct AsyncSaveBuffer {
+  FlashLogSnapshot snapshot; // Snapshot da salvare
+  int battery_index;         // Indice batteria (0-2)
+  int file_index;            // Indice file (0-119)
+  bool ready;                // Buffer pronto per salvataggio
+  bool saving;               // Salvataggio in corso
+};
+
+// File SPIFFS: /logs/bat0_XXX.bin dove XXX = indice snapshot (000-119)
+
 // Dati Sistema
 BatteryData batteries[3];  // 0=6S#1, 1=6S#2, 2=4S
 PWMData autopilot_input;
@@ -148,12 +186,19 @@ MotorOutput motor_output;
 // Dati Taratura
 CalibrationData calibration[3];  // Taratura per ogni batteria
 
-// Dati Grafici
+// Dati Grafici (ultimi 2 minuti, aggiornati ogni secondo)
 ChartData voltage_charts[3];     // Grafici tensione
 ChartData current_charts[3];     // Grafici corrente
 ChartData raw_voltage_charts[3]; // Grafici tensione raw
 ChartData raw_current_charts[3]; // Grafici corrente raw
 ChartData motor_charts[3];       // Grafici PWM motori (right, left, under)
+
+// Metadati Log in SPIFFS (solo indici, dati su file system)
+FlashLog flash_logs[3];          // Metadati per ogni batteria (~12 bytes × 3)
+
+// Buffer asincrono per salvataggio SPIFFS (evita blocchi PWM)
+AsyncSaveBuffer async_save_queue[3];  // Una coda per batteria
+int async_save_count = 0;              // Numero di snapshot in coda
 
 // Statistiche
 unsigned long last_telemetry = 0;
@@ -447,7 +492,7 @@ void initChart(ChartData* chart) {
   chart->max_value = -9999.0;
   chart->avg_value = 0.0;
   chart->total_samples = 0;
-  for (int i = 0; i < 300; i++) {
+  for (int i = 0; i < 120; i++) {
     chart->values[i] = 0.0;
   }
 }
@@ -463,13 +508,13 @@ void addToChart(ChartData* chart, float value) {
   
   // Calcola media mobile
   if (chart->filled) {
-    chart->avg_value = (chart->avg_value * 299 + value) / 300;
+    chart->avg_value = (chart->avg_value * 119 + value) / 120;
   } else {
     chart->avg_value = (chart->avg_value * chart->index + value) / (chart->index + 1);
   }
   
   chart->index++;
-  if (chart->index >= 300) {
+  if (chart->index >= 120) {
     chart->index = 0;
     chart->filled = true;
   }
@@ -479,7 +524,7 @@ void addToChart(ChartData* chart, float value) {
 
 // Aggiorna grafici con frequenza ottimizzata
 void updateCharts() {
-  if (millis() - last_chart_update < 1000) return; // Aggiorna ogni 1 secondo
+  if (millis() - last_chart_update < 1000) return; // Aggiorna ogni 1 secondo (ultimi 2 minuti)
   
   for (int i = 0; i < 3; i++) {
     // Usa SOLO i dati reali delle batterie
@@ -505,13 +550,13 @@ void updateCharts() {
 
 // Ottieni dati grafico per scala temporale specifica
 void getChartData(ChartData* chart, int points, float* output_data, int* actual_points) {
-  int total_points = chart->filled ? 300 : chart->index;
+  int total_points = chart->filled ? 120 : chart->index;
   int step = max(1, total_points / points);
   *actual_points = min(points, total_points / step);
   
   int start = chart->filled ? chart->index : 0;
   for (int i = 0; i < *actual_points; i++) {
-    int idx = (start + i * step) % 300;
+    int idx = (start + i * step) % 120;
     output_data[i] = chart->values[idx];
   }
 }
@@ -532,8 +577,256 @@ void clearAllCharts() {
     initChart(&raw_current_charts[i]);
     initChart(&motor_charts[i]);
   }
-  Serial.println("🗑️ Tutti i grafici sono stati azzerati");
+  Serial.println("🗑️ Tutti i grafici sono stati azzerati (ultimi 2 minuti)");
 }
+
+// ============================================================================
+// GESTIONE LOG IN SPIFFS (4 ORE @ 1 CAMPIONE/SECONDO, SNAPSHOT OGNI 2 MIN)
+// ============================================================================
+
+// Inizializza SPIFFS e crea directory logs
+void initSPIFFS() {
+  if (!SPIFFS.begin(true)) {
+    Serial.println("❌ Errore montaggio SPIFFS!");
+    return;
+  }
+  
+  // Crea directory /logs se non esiste
+  if (!SPIFFS.exists("/logs")) {
+    // SPIFFS non ha mkdir, i file con path creano automaticamente le "directory"
+    Serial.println("📁 Directory /logs pronta");
+  }
+  
+  // Info SPIFFS
+  size_t total = SPIFFS.totalBytes();
+  size_t used = SPIFFS.usedBytes();
+  Serial.printf("💾 SPIFFS: %d KB totali, %d KB usati, %d KB liberi\n", 
+                total/1024, used/1024, (total-used)/1024);
+}
+
+// Inizializza metadati log
+void initFlashLog(FlashLog* log) {
+  log->snapshot_count = 0;
+  log->current_index = 0;
+  log->filled = false;
+  log->last_save = 0;
+  log->save_pending = false;
+}
+
+// Inizializza buffer asincrono
+void initAsyncSaveBuffer() {
+  for (int i = 0; i < 3; i++) {
+    async_save_queue[i].ready = false;
+    async_save_queue[i].saving = false;
+    async_save_queue[i].battery_index = i;
+  }
+  async_save_count = 0;
+}
+
+// Prepara snapshot per salvataggio asincrono (NON blocca il loop!)
+void prepareSnapshotForAsync(int battery_index, ChartData* voltage_chart, ChartData* current_chart) {
+  FlashLog* log = &flash_logs[battery_index];
+  AsyncSaveBuffer* buffer = &async_save_queue[battery_index];
+  
+  // Se c'è già un salvataggio in corso, salta (protegge PWM)
+  if (buffer->ready || buffer->saving) {
+    Serial.printf("⚠️ Salvataggio in corso, skip snapshot bat%d\n", battery_index);
+    return;
+  }
+  
+  // Prepara snapshot nel buffer (operazione veloce in RAM)
+  buffer->snapshot.timestamp = millis();
+  buffer->battery_index = battery_index;
+  buffer->file_index = log->current_index;
+  
+  // Copia i 120 campioni dai grafici RAM (< 1ms)
+  int start_idx = voltage_chart->filled ? voltage_chart->index : 0;
+  for (int i = 0; i < 120; i++) {
+    int idx = (start_idx + i) % 120;
+    
+    buffer->snapshot.entries[i].timestamp = millis() - ((120 - i) * 1000);
+    buffer->snapshot.entries[i].voltage = voltage_chart->values[idx];
+    buffer->snapshot.entries[i].current = current_chart->values[idx];
+    buffer->snapshot.entries[i].power = voltage_chart->values[idx] * current_chart->values[idx];
+  }
+  
+  // Marca buffer come pronto per salvataggio asincrono
+  buffer->ready = true;
+  log->save_pending = true;
+  async_save_count++;
+  
+  // Aggiorna indice (la scrittura vera avverrà in processAsyncSaves())
+  log->current_index++;
+  if (log->current_index >= 120) {
+    log->current_index = 0;
+    log->filled = true;
+  }
+  if (log->snapshot_count < 120) {
+    log->snapshot_count++;
+  }
+  log->last_save = millis();
+}
+
+// Processa salvataggi asincroni (chiamata in momenti sicuri, fuori dal loop critico)
+void processAsyncSaves() {
+  // Processa UN solo snapshot per chiamata (limita il tempo di blocco)
+  for (int i = 0; i < 3; i++) {
+    AsyncSaveBuffer* buffer = &async_save_queue[i];
+    
+    if (buffer->ready && !buffer->saving) {
+      buffer->saving = true;
+      
+      // Nome file: /logs/bat0_042.bin
+      char filename[32];
+      sprintf(filename, "/logs/bat%d_%03d.bin", buffer->battery_index, buffer->file_index);
+      
+      // Scrittura SPIFFS (operazione bloccante ~10-50ms)
+      File file = SPIFFS.open(filename, FILE_WRITE);
+      if (file) {
+        size_t written = file.write((uint8_t*)&buffer->snapshot, sizeof(FlashLogSnapshot));
+        file.close();
+        
+        if (written == sizeof(FlashLogSnapshot)) {
+          // Successo
+          flash_logs[buffer->battery_index].save_pending = false;
+        } else {
+          Serial.printf("❌ Errore scrittura %s\n", filename);
+        }
+      } else {
+        Serial.printf("❌ Errore apertura %s\n", filename);
+      }
+      
+      // Libera buffer
+      buffer->ready = false;
+      buffer->saving = false;
+      async_save_count--;
+      
+      return; // Processa solo uno per volta
+    }
+  }
+}
+
+// Prepara snapshot ogni 2 minuti (chiamata dal loop - NON blocca!)
+void saveLogsToFlash() {
+  static unsigned long last_flash_save = 0;
+  
+  // Prepara snapshot ogni 2 minuti (120 secondi)
+  if (millis() - last_flash_save < 120000) return;
+  
+  // Prepara i 3 snapshot (veloce, solo copia RAM→RAM)
+  for (int i = 0; i < 3; i++) {
+    prepareSnapshotForAsync(i, &voltage_charts[i], &current_charts[i]);
+  }
+  
+  last_flash_save = millis();
+  
+  Serial.printf("📦 Snapshot preparati per salvataggio asincrono (Coda: %d, Idx: %d/120)\n", 
+                async_save_count,
+                flash_logs[0].current_index);
+}
+
+// Carica log dalla flash (per ripristino dopo reboot)
+void loadLogsFromFlash() {
+  preferences.begin("logs", true);
+  
+  for (int i = 0; i < 3; i++) {
+    String prefix = "log" + String(i) + "_";
+    
+    flash_logs[i].index = preferences.getInt((prefix + "idx").c_str(), 0);
+    flash_logs[i].filled = preferences.getBool((prefix + "filled").c_str(), false);
+    flash_logs[i].last_save = millis();
+    
+    // Carica solo gli ultimi 10 campioni per risparmiare tempo di boot
+    int entries_to_load = min(10, flash_logs[i].index);
+    for (int j = 0; j < entries_to_load; j++) {
+      String entry_prefix = prefix + "e" + String(j) + "_";
+      int real_idx = (flash_logs[i].index - entries_to_load + j + 240) % 240;
+      
+      flash_logs[i].entries[real_idx].timestamp = 
+        preferences.getULong((entry_prefix + "ts").c_str(), 0);
+      flash_logs[i].entries[real_idx].voltage = 
+        preferences.getFloat((entry_prefix + "v").c_str(), 0.0);
+      flash_logs[i].entries[real_idx].current = 
+        preferences.getFloat((entry_prefix + "c").c_str(), 0.0);
+      flash_logs[i].entries[real_idx].power = 
+        preferences.getFloat((entry_prefix + "p").c_str(), 0.0);
+    }
+  }
+  
+  preferences.end();
+  Serial.println("📂 Log caricati dalla flash");
+}
+
+// Esporta log da SPIFFS come JSON per API
+void getFlashLogJSON(int battery_index, String* output, int max_entries) {
+  FlashLog* log = &flash_logs[battery_index];
+  int total_snapshots = log->snapshot_count;
+  int total_entries = total_snapshots * 120; // Ogni snapshot ha 120 campioni
+  
+  // Limita il numero di entries da esportare
+  int entries_to_export = min(max_entries, total_entries);
+  int snapshots_to_export = (entries_to_export + 119) / 120; // Arrotonda per eccesso
+  
+  *output = "[";
+  
+  int start_snapshot = log->filled ? log->current_index : 0;
+  int entry_count = 0;
+  
+  FlashLogSnapshot snapshot;
+  
+  for (int s = 0; s < snapshots_to_export && entry_count < entries_to_export; s++) {
+    int snap_idx = (start_snapshot + s) % 120;
+    
+    // Leggi snapshot da SPIFFS
+    char filename[32];
+    sprintf(filename, "/logs/bat%d_%03d.bin", battery_index, snap_idx);
+    
+    File file = SPIFFS.open(filename, FILE_READ);
+    if (!file) {
+      Serial.printf("⚠️ Snapshot %s non trovato\n", filename);
+      continue;
+    }
+    
+    file.read((uint8_t*)&snapshot, sizeof(FlashLogSnapshot));
+    file.close();
+    
+    // Aggiungi campioni al JSON
+    for (int e = 0; e < 120 && entry_count < entries_to_export; e++) {
+      if (entry_count > 0) *output += ",";
+      *output += "{";
+      *output += "\"ts\":" + String(snapshot.entries[e].timestamp) + ",";
+      *output += "\"v\":" + String(snapshot.entries[e].voltage, 2) + ",";
+      *output += "\"c\":" + String(snapshot.entries[e].current, 2) + ",";
+      *output += "\"p\":" + String(snapshot.entries[e].power, 1);
+      *output += "}";
+      entry_count++;
+    }
+  }
+  
+  *output += "]";
+}
+
+// Azzera tutti i log da SPIFFS
+void clearAllLogs() {
+  // Cancella tutti i file snapshot
+  for (int bat = 0; bat < 3; bat++) {
+    for (int snap = 0; snap < 120; snap++) {
+      char filename[32];
+      sprintf(filename, "/logs/bat%d_%03d.bin", bat, snap);
+      if (SPIFFS.exists(filename)) {
+        SPIFFS.remove(filename);
+      }
+    }
+    // Reset metadati
+    initFlashLog(&flash_logs[bat]);
+  }
+  
+  Serial.println("🗑️ Tutti i log su SPIFFS sono stati azzerati");
+}
+
+// ============================================================================
+// FUNZIONI CALIBRAZIONE
+// ============================================================================
 
 // Calibrazione automatica basata sui dati raw attuali
 void autoCalibration(int battery_index, float raw_voltage, float raw_current, float measured_voltage, float measured_current) {
@@ -940,6 +1233,40 @@ void handleResetCalibration() {
   }
 }
 
+void handleFlashLogs() {
+  // Restituisce i log storici dalla flash (4 ore @ 1Hz, snapshot ogni 2 min)
+  int battery = server.arg("battery").toInt();
+  int max_entries = server.arg("limit").toInt();
+  if (max_entries == 0) max_entries = 14400; // Default: tutti (120 snapshot × 120 campioni)
+  
+  if (battery < 0 || battery > 2) {
+    server.send(400, "application/json", "{\"status\":\"error\",\"message\":\"Batteria non valida\"}");
+    return;
+  }
+  
+  String json_output;
+  getFlashLogJSON(battery, &json_output, max_entries);
+  
+  int total_snapshots = flash_logs[battery].snapshot_count;
+  int total_entries = total_snapshots * 120;
+  
+  String response = "{\"status\":\"ok\",\"battery\":" + String(battery) + 
+                    ",\"snapshots\":" + String(total_snapshots) +
+                    ",\"entries\":" + String(total_entries) +
+                    ",\"data\":" + json_output + "}";
+  
+  server.send(200, "application/json", response);
+}
+
+void handleClearLogs() {
+  if (server.method() == HTTP_POST) {
+    clearAllLogs();
+    server.send(200, "application/json", "{\"status\":\"ok\",\"message\":\"Log azzerati\"}");
+  } else {
+    server.send(405, "application/json", "{\"status\":\"error\",\"message\":\"Metodo non consentito\"}");
+  }
+}
+
 void handleRoot() {
   String html = "<!DOCTYPE html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>";
   html += "<title>Alix Blimp Battery Monitor</title>";
@@ -1222,15 +1549,15 @@ void handleChartsPage() {
   html += ".stat-value{font-size:18px;font-weight:bold;color:#10b981}";
   html += ".stat-label{font-size:12px;color:#94a3b8}";
   html += "</style></head><body>";
-  html += "<h1>📈 Grafici Storici Batterie</h1>";
+  html += "<h1>📈 Grafici Storici Batterie (Ultimi 2 Minuti)</h1>";
   html += "<div class='controls'>";
   html += "<label>Scala temporale:</label>";
   html += "<select id='timeScale' onchange='changeScale()'>";
   html += "<option value='10s'>10 secondi</option>";
   html += "<option value='30s'>30 secondi</option>";
   html += "<option value='1m'>1 minuto</option>";
-  html += "<option value='2m'>2 minuti</option>";
-  html += "<option value='5m' selected>5 minuti</option>";
+  html += "<option value='2m' selected>2 minuti</option>";
+  html += "<option value='5m'>5 minuti</option>";
   html += "</select>";
   html += "<button onclick='exportCSV()'>📥 Esporta CSV</button>";
   html += "<button onclick='update()'>🔄 Aggiorna</button>";
@@ -1623,7 +1950,7 @@ void setup() {
     Serial.println("✅ Calibrazione ripristinata!");
   }
   
-  // Inizializzazione Grafici
+  // Inizializzazione Grafici (ultimi 2 minuti, 1 secondo)
   for (int i = 0; i < 3; i++) {
     initChart(&voltage_charts[i]);
     initChart(&current_charts[i]);
@@ -1631,6 +1958,20 @@ void setup() {
     initChart(&raw_current_charts[i]);
     initChart(&motor_charts[i]);
   }
+  Serial.println("📊 Grafici inizializzati (120 punti, 2 minuti @ 1Hz)");
+  
+  // Inizializzazione SPIFFS
+  initSPIFFS();
+  
+  // Inizializzazione Log (metadati in RAM, snapshot su SPIFFS)
+  for (int i = 0; i < 3; i++) {
+    initFlashLog(&flash_logs[i]);
+  }
+  
+  // Inizializzazione buffer asincrono
+  initAsyncSaveBuffer();
+  
+  Serial.println("💾 Log SPIFFS pronti (120 snapshot × 120 campioni, 4 ore, salv asincrono)");
   
   // Configurazione PWM Output Motori (LEDC channels)
   ledcSetup(PWM_OUT_RIGHT_CHANNEL, PWM_FREQ, 12);  // 50Hz, 12-bit resolution
@@ -1667,7 +2008,9 @@ void setup() {
   server.on("/calibration", HTTP_POST, handleCalibration);
   server.on("/charts", HTTP_GET, handleChartsPage);
   server.on("/charts-data", HTTP_GET, handleCharts);
+  server.on("/flash-logs", HTTP_GET, handleFlashLogs);
   server.on("/clear-charts", HTTP_POST, handleClearCharts);
+  server.on("/clear-logs", HTTP_POST, handleClearLogs);
   server.on("/reset-calibration", HTTP_POST, handleResetCalibration);
   server.on("/csv", handleCSV);
   server.begin();
@@ -1692,11 +2035,17 @@ void loop() {
   // Telemetria
   sendTelemetry();
   
-  // Aggiorna grafici
+  // Aggiorna grafici (ogni secondo)
   updateCharts();
+  
+  // Salva snapshot in Flash (ogni 2 minuti, 120 snapshot = 4 ore)
+  saveLogsToFlash();
   
   // Web Server
   server.handleClient();
+  
+  // Processa salvataggi asincroni (1 per loop, fuori dal path critico PWM)
+  processAsyncSaves();
   
   // Piccola pausa per stabilità
   delay(1);
