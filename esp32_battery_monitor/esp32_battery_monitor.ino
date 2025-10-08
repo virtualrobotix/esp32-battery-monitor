@@ -36,7 +36,7 @@
 // PWM Input dall'Autopilota
 #define PWM_IN_RIGHT       18    // GPIO18 - Motore Destro
 #define PWM_IN_LEFT        19    // GPIO19 - Motore Sinistro
-#define PWM_IN_UNDER       5     // GPIO5 - Motori Sottostanti
+#define PWM_IN_UNDER       22    // GPIO22 - Motori Sottostanti (era GPIO5 - problematico al boot)
 
 // Digital Input per Direzione
 #define DIR_RIGHT_PIN      21    // GPIO21 - Direzione Motore Destro
@@ -1494,6 +1494,12 @@ void setup() {
   Serial.begin(115200);
   Serial.println("🚀 AlixBlimp Battery Monitor & Motor Control");
   Serial.println("========================================");
+  
+  // Configurazione Pin PWM Input (dall'autopilota)
+  pinMode(PWM_IN_RIGHT, INPUT);
+  pinMode(PWM_IN_LEFT, INPUT);
+  pinMode(PWM_IN_UNDER, INPUT);
+  Serial.println("✅ Pin PWM Input configurati (GPIO18, GPIO19, GPIO22)");
   
   // Configurazione ADC
   analogReadResolution(12);
