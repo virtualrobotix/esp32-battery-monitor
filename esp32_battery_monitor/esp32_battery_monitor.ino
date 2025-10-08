@@ -615,6 +615,16 @@ void sendTelemetry() {
     const char* names[] = {"6S#1", "6S#2", "4S"};
     Serial.printf("Batteria %s: %.2fV, %.2fA, %.1fW\n", 
                   names[i], batteries[i].voltage, batteries[i].current, batteries[i].power);
+    float raw_calc = (batteries[i].raw_current_voltage - ACS758_VREF) / ACS758_SENSITIVITY;
+    Serial.printf("  -> RAW: ADC=%.0f, Voltage=%.3fV, Raw_I=%.2fA\n",
+                  batteries[i].raw_current_adc, 
+                  batteries[i].raw_current_voltage,
+                  raw_calc);
+    Serial.printf("     Calibr: (%.2f + %.3f) × %.3f = %.2fA\n",
+                  raw_calc,
+                  calibration[i].current_offset,
+                  calibration[i].current_scale,
+                  batteries[i].current);
   }
   
   Serial.printf("Autopilota: MotorRight=%d, MotorLeft=%d, MotorUnder=%d, DirR=%d, DirL=%d\n",
@@ -883,6 +893,7 @@ void handleRoot() {
   html += ".card{background:#111827;border:1px solid #1f2937;border-radius:10px;padding:12px;box-shadow:0 2px 8px rgba(0,0,0,.25)}";
   html += ".card h3{margin:0 0 8px;font-size:16px;color:#e5e7eb}";
   html += ".row{display:flex;justify-content:space-between;margin:6px 0;font-size:14px;color:#cbd5e1}";
+  html += ".row-raw{display:flex;justify-content:space-between;margin:4px 0;font-size:11px;color:#6b7280;padding-left:8px}";
   html += ".muted{color:#94a3b8}";
   html += ".status-badges{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}";
   html += ".badge{display:inline-flex;align-items:center;gap:6px;padding:4px 8px;border-radius:999px;background:#0f172a;border:1px solid #1f2937;font-size:12px;color:#cbd5e1}";
@@ -892,13 +903,13 @@ void handleRoot() {
   html += "</style></head><body><div class='container'>";
   html += "<h1>🔋 Alix Blimp Battery Monitor - TEST</h1>";
   html += "<div class='grid'>";
-  html += "<div class='card' id='b0'><h3>6S Battery #1</h3><div class='row'><span class='muted'>Tensione</span><strong><span id='b0v'>-</span> V</strong></div><div class='row'><span class='muted'>Corrente</span><strong><span id='b0c'>-</span> A</strong></div><div class='row'><span class='muted'>Potenza</span><strong><span id='b0p'>-</span> W</strong></div></div>";
-  html += "<div class='card' id='b1'><h3>6S Battery #2</h3><div class='row'><span class='muted'>Tensione</span><strong><span id='b1v'>-</span> V</strong></div><div class='row'><span class='muted'>Corrente</span><strong><span id='b1c'>-</span> A</strong></div><div class='row'><span class='muted'>Potenza</span><strong><span id='b1p'>-</span> W</strong></div></div>";
-  html += "<div class='card' id='b2'><h3>4S Battery</h3><div class='row'><span class='muted'>Tensione</span><strong><span id='b2v'>-</span> V</strong></div><div class='row'><span class='muted'>Corrente</span><strong><span id='b2c'>-</span> A</strong></div><div class='row'><span class='muted'>Potenza</span><strong><span id='b2p'>-</span> W</strong></div></div>";
+  html += "<div class='card' id='b0'><h3>6S Battery #1</h3><div class='row'><span class='muted'>Tensione</span><strong><span id='b0v'>-</span> V</strong></div><div class='row-raw'><span class='muted'>RAW V:</span><span><span id='b0rv'>-</span> V (ADC: <span id='b0rva'>-</span>)</span></div><div class='row'><span class='muted'>Corrente</span><strong><span id='b0c'>-</span> A</strong></div><div class='row-raw'><span class='muted'>RAW I:</span><span><span id='b0rc'>-</span> V (ADC: <span id='b0rca'>-</span>)</span></div><div class='row'><span class='muted'>Potenza</span><strong><span id='b0p'>-</span> W</strong></div></div>";
+  html += "<div class='card' id='b1'><h3>6S Battery #2</h3><div class='row'><span class='muted'>Tensione</span><strong><span id='b1v'>-</span> V</strong></div><div class='row-raw'><span class='muted'>RAW V:</span><span><span id='b1rv'>-</span> V (ADC: <span id='b1rva'>-</span>)</span></div><div class='row'><span class='muted'>Corrente</span><strong><span id='b1c'>-</span> A</strong></div><div class='row-raw'><span class='muted'>RAW I:</span><span><span id='b1rc'>-</span> V (ADC: <span id='b1rca'>-</span>)</span></div><div class='row'><span class='muted'>Potenza</span><strong><span id='b1p'>-</span> W</strong></div></div>";
+  html += "<div class='card' id='b2'><h3>4S Battery</h3><div class='row'><span class='muted'>Tensione</span><strong><span id='b2v'>-</span> V</strong></div><div class='row-raw'><span class='muted'>RAW V:</span><span><span id='b2rv'>-</span> V (ADC: <span id='b2rva'>-</span>)</span></div><div class='row'><span class='muted'>Corrente</span><strong><span id='b2c'>-</span> A</strong></div><div class='row-raw'><span class='muted'>RAW I:</span><span><span id='b2rc'>-</span> V (ADC: <span id='b2rca'>-</span>)</span></div><div class='row'><span class='muted'>Potenza</span><strong><span id='b2p'>-</span> W</strong></div></div>";
   html += "<div class='card'><h3>Status Sistema</h3><div class='row'><span class='muted'>Frequenza Loop</span><strong><span id='lf'>-</span> Hz</strong></div><div class='row'><span class='muted'>Input Right</span><strong><span id='ir'>-</span> μs</strong></div><div class='row'><span class='muted'>Input Left</span><strong><span id='il'>-</span> μs</strong></div><div class='row'><span class='muted'>Input Under</span><strong><span id='iu'>-</span> μs</strong></div><div class='status-badges'><span class='badge' id='dr'><span>Dir Right</span><strong>-</strong></span><span class='badge' id='dl'><span>Dir Left</span><strong>-</strong></span><span class='badge'><span>Output Right</span><strong id='or'>- μs</strong></span><span class='badge'><span>Output Left</span><strong id='ol'>- μs</strong></span></div></div>";
   html += "</div>";
   html += "<div class='footer'>Aggiornamento ogni 1s via <a href='/api'>/api</a> | <a href='/calibration'>Taratura</a> | <a href='/charts'>Grafici</a></div>";
-  html += "</div><script>(function(){function q(id){return document.getElementById(id)};function setText(id,val,dec){q(id).textContent=(typeof dec==='number'?Number(val).toFixed(dec):val)};function upd(d){for(var i=0;i<3;i++){setText('b'+i+'v',d.batteries[i].voltage,2);setText('b'+i+'c',d.batteries[i].current,2);setText('b'+i+'p',d.batteries[i].power,1)}setText('lf',d.loop_frequency,1);setText('ir',d.autopilot.motor_right);setText('il',d.autopilot.motor_left);setText('iu',d.autopilot.motor_under);var dr=d.autopilot.dir_right,dl=d.autopilot.dir_left;q('dr').className='badge '+(dr?'ok':'err');q('dr').lastElementChild.textContent=dr?'Forward':'Reverse';q('dl').className='badge '+(dl?'ok':'err');q('dl').lastElementChild.textContent=dl?'Forward':'Reverse';setText('or',d.motors.right_pwm+' μs');setText('ol',d.motors.left_pwm+' μs')}function tick(){fetch('/api',{cache:'no-store'}).then(function(r){return r.json()}).then(upd).catch(function(){}).finally(function(){setTimeout(tick,1000)})}tick()})();</script></body></html>";
+  html += "</div><script>(function(){function q(id){return document.getElementById(id)};function setText(id,val,dec){q(id).textContent=(typeof dec==='number'?Number(val).toFixed(dec):val)};function upd(d){for(var i=0;i<3;i++){setText('b'+i+'v',d.batteries[i].voltage,2);setText('b'+i+'c',d.batteries[i].current,2);setText('b'+i+'p',d.batteries[i].power,1);setText('b'+i+'rv',d.batteries[i].raw_voltage,3);setText('b'+i+'rva',d.batteries[i].raw_voltage_adc,0);setText('b'+i+'rc',d.batteries[i].raw_current,3);setText('b'+i+'rca',d.batteries[i].raw_current_adc,0);}setText('lf',d.loop_frequency,1);setText('ir',d.autopilot.motor_right);setText('il',d.autopilot.motor_left);setText('iu',d.autopilot.motor_under);var dr=d.autopilot.dir_right,dl=d.autopilot.dir_left;q('dr').className='badge '+(dr?'ok':'err');q('dr').lastElementChild.textContent=dr?'Forward':'Reverse';q('dl').className='badge '+(dl?'ok':'err');q('dl').lastElementChild.textContent=dl?'Forward':'Reverse';setText('or',d.motors.right_pwm+' μs');setText('ol',d.motors.left_pwm+' μs')}function tick(){fetch('/api',{cache:'no-store'}).then(function(r){return r.json()}).then(upd).catch(function(){}).finally(function(){setTimeout(tick,1000)})}tick()})();</script></body></html>";
   server.send(200, "text/html", html);
 }
 
@@ -1455,13 +1466,18 @@ void handleChartsPage() {
 void handleAPI() {
   DynamicJsonDocument doc(1024);
   
-  // Batterie
+  // Batterie con dati RAW
   JsonArray batteryArray = doc.createNestedArray("batteries");
   for (int i = 0; i < 3; i++) {
     JsonObject battery = batteryArray.createNestedObject();
     battery["voltage"] = batteries[i].voltage;
     battery["current"] = batteries[i].current;
     battery["power"] = batteries[i].power;
+    // Dati RAW
+    battery["raw_voltage_adc"] = batteries[i].raw_voltage_adc;
+    battery["raw_voltage"] = batteries[i].raw_voltage_voltage;
+    battery["raw_current_adc"] = batteries[i].raw_current_adc;
+    battery["raw_current"] = batteries[i].raw_current_voltage;
   }
   
   // Autopilota
@@ -1505,11 +1521,46 @@ void setup() {
   analogReadResolution(12);
   analogSetAttenuation(ADC_11db); // 0-3.3V range
   
+  // Test lettura ADC sensori corrente
+  Serial.println("\n🔍 Test Sensori Corrente:");
+  delay(100);
+  float test_adc1 = analogRead(CURRENT_6S1_PIN);
+  float test_v1 = (test_adc1 / 4095.0) * 3.3;
+  Serial.printf("  GPIO32 (6S#1): ADC=%.0f, Voltage=%.3fV\n", test_adc1, test_v1);
+  
+  float test_adc2 = analogRead(CURRENT_6S2_PIN);
+  float test_v2 = (test_adc2 / 4095.0) * 3.3;
+  Serial.printf("  GPIO33 (6S#2): ADC=%.0f, Voltage=%.3fV\n", test_adc2, test_v2);
+  
+  float test_adc3 = analogRead(CURRENT_4S_PIN);
+  float test_v3 = (test_adc3 / 4095.0) * 3.3;
+  Serial.printf("  GPIO34 (4S):   ADC=%.0f, Voltage=%.3fV\n", test_adc3, test_v3);
+  Serial.printf("  Vref atteso: %.2fV (0A)\n\n", ACS758_VREF);
+  
   // Inizializzazione Taratura
   initCalibration();
   
   // Carica le impostazioni di calibrazione salvate dalla memoria flash
   loadCalibrationFromFlash();
+  
+  // Verifica calibrazione: se current_scale = 0, resetta
+  Serial.println("\n🔍 Verifica Calibrazione:");
+  bool need_reset = false;
+  for (int i = 0; i < 3; i++) {
+    Serial.printf("  Batteria %d: offset=%.3f, scale=%.3f\n", 
+                  i, calibration[i].current_offset, calibration[i].current_scale);
+    if (calibration[i].current_scale == 0.0 || isnan(calibration[i].current_scale)) {
+      Serial.printf("    ⚠️ Scale errato! Necessario reset.\n");
+      need_reset = true;
+    }
+  }
+  
+  if (need_reset) {
+    Serial.println("⚠️ Calibrazione corrotta! Ripristino valori default...");
+    resetCalibrationToDefault();
+    loadCalibrationFromFlash();
+    Serial.println("✅ Calibrazione ripristinata!");
+  }
   
   // Inizializzazione Grafici
   for (int i = 0; i < 3; i++) {
