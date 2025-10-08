@@ -55,9 +55,13 @@
 #define ADC_VREF           3.3
 #define ADC_SAMPLES        64
 
-// Parametri Sensori Corrente ACS758 con Partitore
-#define ACS758_SENSITIVITY 0.01  // 10mV/A (dopo partitore 5V→3V)
-#define ACS758_VREF        1.6   // Tensione di riferimento @ 0A (dopo partitore)
+// Parametri Sensori Corrente ACS758 con Partitore (valori di default)
+#define ACS758_SENSITIVITY_DEFAULT 0.01  // 10mV/A (dopo partitore 5V→3V)
+#define ACS758_VREF_DEFAULT        1.46  // Tensione di riferimento @ 0A (dopo partitore)
+
+// Variabili globali per parametri calibrati
+float ACS758_SENSITIVITY = ACS758_SENSITIVITY_DEFAULT;
+float ACS758_VREF = ACS758_VREF_DEFAULT;
 
 // Parametri Partitori Tensione
 #define DIVIDER_6S_RATIO   11   // 33.6V -> 3.05V
@@ -119,6 +123,9 @@ struct CalibrationData {
   float current_offset;     // Offset corrente
   float current_scale;      // Scala corrente
   float divider_ratio;      // Rapporto partitore
+  // Parametri sensore corrente calibrati
+  float acs758_vref;        // VREF calibrato per questo sensore
+  float acs758_sensitivity; // Sensibilità calibrata per questo sensore
 };
 
 // Strutture per Grafici (dati storici ottimizzati)
@@ -176,6 +183,8 @@ void saveCalibrationToFlash() {
     preferences.putFloat((prefix + "c_offset").c_str(), calibration[i].current_offset);
     preferences.putFloat((prefix + "c_scale").c_str(), calibration[i].current_scale);
     preferences.putFloat((prefix + "divider").c_str(), calibration[i].divider_ratio);
+    preferences.putFloat((prefix + "acs_vref").c_str(), calibration[i].acs758_vref);
+    preferences.putFloat((prefix + "acs_sens").c_str(), calibration[i].acs758_sensitivity);
   }
   
   preferences.end();
@@ -195,6 +204,8 @@ void loadCalibrationFromFlash() {
     calibration[i].current_offset = preferences.getFloat((prefix + "c_offset").c_str(), 0.0);
     calibration[i].current_scale = preferences.getFloat((prefix + "c_scale").c_str(), 1.0);
     calibration[i].divider_ratio = preferences.getFloat((prefix + "divider").c_str(), DIVIDER_6S_RATIO);
+    calibration[i].acs758_vref = preferences.getFloat((prefix + "acs_vref").c_str(), ACS758_VREF_DEFAULT);
+    calibration[i].acs758_sensitivity = preferences.getFloat((prefix + "acs_sens").c_str(), ACS758_SENSITIVITY_DEFAULT);
   }
   
   preferences.end();
@@ -214,9 +225,34 @@ void resetCalibrationToDefault() {
     calibration[i].current_offset = 0.0;
     calibration[i].current_scale = 1.0;
     calibration[i].divider_ratio = DIVIDER_6S_RATIO;
+    calibration[i].acs758_vref = ACS758_VREF_DEFAULT;
+    calibration[i].acs758_sensitivity = ACS758_SENSITIVITY_DEFAULT;
   }
   
+  // Ripristina anche i parametri globali
+  ACS758_VREF = ACS758_VREF_DEFAULT;
+  ACS758_SENSITIVITY = ACS758_SENSITIVITY_DEFAULT;
+  
   Serial.println("🔄 Impostazioni di calibrazione ripristinate ai valori di default");
+}
+
+// Inizializza la calibrazione con valori di default
+void initCalibration() {
+  for (int i = 0; i < 3; i++) {
+    calibration[i].voltage_offset = 0.0;
+    calibration[i].voltage_scale = 1.0;
+    calibration[i].current_offset = 0.0;
+    calibration[i].current_scale = 1.0;
+    calibration[i].divider_ratio = DIVIDER_6S_RATIO;
+    calibration[i].acs758_vref = ACS758_VREF_DEFAULT;
+    calibration[i].acs758_sensitivity = ACS758_SENSITIVITY_DEFAULT;
+  }
+  
+  // Inizializza parametri globali
+  ACS758_VREF = ACS758_VREF_DEFAULT;
+  ACS758_SENSITIVITY = ACS758_SENSITIVITY_DEFAULT;
+  
+  Serial.println("🔧 Calibrazione inizializzata con valori di default");
 }
 
 // ============================================================================
@@ -257,7 +293,12 @@ float readVoltage(int pin, int battery_index, float* raw_adc, float* raw_voltage
 float readCurrent(int pin, int battery_index, float* raw_adc, float* raw_voltage_out) {
   float adc_value = readADC(pin);
   float voltage = adcToVoltage(adc_value);
-  float raw_current = (voltage - ACS758_VREF) / ACS758_SENSITIVITY;
+  
+  // Usa parametri calibrati per questo sensore specifico
+  float vref = calibration[battery_index].acs758_vref;
+  float sensitivity = calibration[battery_index].acs758_sensitivity;
+  
+  float raw_current = (voltage - vref) / sensitivity;
   
   // Salva dati raw
   *raw_adc = adc_value;
@@ -317,20 +358,34 @@ void simpleCalibration(int battery_index, float measured_voltage, float measured
   }
   
   // Per corrente: I_measured = ((V_raw - V_ref) / sensitivity + offset) * scale
-  // Assumendo offset = 0 e scale = 1, calcoliamo la sensitivity corretta
+  // Calibrazione a due punti: 0A e corrente nota
   float raw_current_voltage = batteries[battery_index].raw_current_voltage;
-  float voltage_diff = raw_current_voltage - ACS758_VREF;
-  if (abs(voltage_diff) > 0.01) { // Evita divisione per zero
+  
+  if (abs(measured_current) > 0.1) { // Solo se c'è corrente significativa
+    // Calcola la sensibilità: (V_measured - V_0A) / I_measured
+    // Assumendo che V_0A sia il VREF attuale
+    float voltage_diff = raw_current_voltage - calibration[battery_index].acs758_vref;
     float calculated_sensitivity = voltage_diff / measured_current;
-    // Aggiorna la sensitivity globale (nota: questo influenzerà tutti i sensori)
-    // Per ora salviamo come scale factor
+    
+    // Aggiorna i parametri del sensore
+    calibration[battery_index].acs758_sensitivity = calculated_sensitivity;
     calibration[battery_index].current_offset = 0.0;
-    calibration[battery_index].current_scale = ACS758_SENSITIVITY / calculated_sensitivity;
+    calibration[battery_index].current_scale = 1.0;
+    
+    Serial.printf("   Corrente: %.2fA -> Sensibilità: %.4f V/A\n", measured_current, calculated_sensitivity);
+  } else {
+    // Se corrente = 0, aggiorna solo il VREF
+    calibration[battery_index].acs758_vref = raw_current_voltage;
+    calibration[battery_index].current_offset = 0.0;
+    calibration[battery_index].current_scale = 1.0;
+    
+    Serial.printf("   Corrente: 0A -> VREF aggiornato: %.3fV\n", raw_current_voltage);
   }
   
   Serial.printf("🔧 Calibrazione semplice batteria %d:\n", battery_index);
   Serial.printf("   Tensione: %.2fV -> Divider ratio: %.2f\n", measured_voltage, calibration[battery_index].divider_ratio);
-  Serial.printf("   Corrente: %.2fA -> Scale factor: %.3f\n", measured_current, calibration[battery_index].current_scale);
+  Serial.printf("   Corrente: %.2fA -> VREF: %.3fV, Sensibilità: %.4f V/A\n", 
+                measured_current, calibration[battery_index].acs758_vref, calibration[battery_index].acs758_sensitivity);
   
   // Salva le impostazioni nella memoria flash
   saveCalibrationToFlash();
@@ -615,13 +670,17 @@ void sendTelemetry() {
     const char* names[] = {"6S#1", "6S#2", "4S"};
     Serial.printf("Batteria %s: %.2fV, %.2fA, %.1fW\n", 
                   names[i], batteries[i].voltage, batteries[i].current, batteries[i].power);
-    float raw_calc = (batteries[i].raw_current_voltage - ACS758_VREF) / ACS758_SENSITIVITY;
+    // Usa parametri calibrati per questo sensore
+    float vref = calibration[i].acs758_vref;
+    float sensitivity = calibration[i].acs758_sensitivity;
+    float raw_calc = (batteries[i].raw_current_voltage - vref) / sensitivity;
+    
     Serial.printf("  -> RAW: ADC=%.0f, Voltage=%.3fV, Raw_I=%.2fA\n",
                   batteries[i].raw_current_adc, 
                   batteries[i].raw_current_voltage,
                   raw_calc);
-    Serial.printf("     Calibr: (%.2f + %.3f) × %.3f = %.2fA\n",
-                  raw_calc,
+    Serial.printf("     VREF=%.3fV, Sens=%.4fV/A, Calibr: (%.2f + %.3f) × %.3f = %.2fA\n",
+                  vref, sensitivity, raw_calc,
                   calibration[i].current_offset,
                   calibration[i].current_scale,
                   batteries[i].current);
@@ -1535,7 +1594,8 @@ void setup() {
   float test_adc3 = analogRead(CURRENT_4S_PIN);
   float test_v3 = (test_adc3 / 4095.0) * 3.3;
   Serial.printf("  GPIO34 (4S):   ADC=%.0f, Voltage=%.3fV\n", test_adc3, test_v3);
-  Serial.printf("  Vref atteso: %.2fV (0A)\n\n", ACS758_VREF);
+  Serial.printf("  Vref atteso: %.2fV (0A)\n", ACS758_VREF_DEFAULT);
+  Serial.printf("  Sensibilità attesa: %.4f V/A\n\n", ACS758_SENSITIVITY_DEFAULT);
   
   // Inizializzazione Taratura
   initCalibration();
@@ -1547,10 +1607,12 @@ void setup() {
   Serial.println("\n🔍 Verifica Calibrazione:");
   bool need_reset = false;
   for (int i = 0; i < 3; i++) {
-    Serial.printf("  Batteria %d: offset=%.3f, scale=%.3f\n", 
-                  i, calibration[i].current_offset, calibration[i].current_scale);
-    if (calibration[i].current_scale == 0.0 || isnan(calibration[i].current_scale)) {
-      Serial.printf("    ⚠️ Scale errato! Necessario reset.\n");
+    Serial.printf("  Batteria %d: VREF=%.3fV, Sens=%.4fV/A, offset=%.3f, scale=%.3f\n", 
+                  i, calibration[i].acs758_vref, calibration[i].acs758_sensitivity,
+                  calibration[i].current_offset, calibration[i].current_scale);
+    if (calibration[i].current_scale == 0.0 || isnan(calibration[i].current_scale) ||
+        calibration[i].acs758_sensitivity == 0.0 || isnan(calibration[i].acs758_sensitivity)) {
+      Serial.printf("    ⚠️ Parametri errati! Necessario reset.\n");
       need_reset = true;
     }
   }
