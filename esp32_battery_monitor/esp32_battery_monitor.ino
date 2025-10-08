@@ -1275,6 +1275,66 @@ void handleClearLogs() {
   }
 }
 
+void handleStorageInfo() {
+  // Informazioni sulla memoria SPIFFS
+  size_t total = SPIFFS.totalBytes();
+  size_t used = SPIFFS.usedBytes();
+  size_t free = total - used;
+  
+  // Conta i file di log per ogni batteria
+  int file_counts[3] = {0, 0, 0};
+  
+  for (int bat = 0; bat < 3; bat++) {
+    for (int snap = 0; snap < 120; snap++) {
+      char filename[32];
+      sprintf(filename, "/logs/bat%d_%03d.bin", bat, snap);
+      if (SPIFFS.exists(filename)) {
+        file_counts[bat]++;
+      }
+    }
+  }
+  
+  // Calcola ore registrate (ogni file = 2 minuti di dati)
+  float hours_bat0 = (file_counts[0] * 2.0) / 60.0;
+  float hours_bat1 = (file_counts[1] * 2.0) / 60.0;
+  float hours_bat2 = (file_counts[2] * 2.0) / 60.0;
+  
+  // Percentuale riempimento (max 120 file per batteria)
+  float percent_bat0 = (file_counts[0] / 120.0) * 100.0;
+  float percent_bat1 = (file_counts[1] / 120.0) * 100.0;
+  float percent_bat2 = (file_counts[2] / 120.0) * 100.0;
+  
+  // Memoria disponibile per nuovi snapshot (approssimativo)
+  int snapshot_size = sizeof(FlashLogSnapshot);
+  int available_snapshots = free / snapshot_size;
+  
+  String json = "{";
+  json += "\"total_bytes\":" + String(total) + ",";
+  json += "\"used_bytes\":" + String(used) + ",";
+  json += "\"free_bytes\":" + String(free) + ",";
+  json += "\"percent_used\":" + String((used * 100) / total) + ",";
+  json += "\"snapshot_size\":" + String(snapshot_size) + ",";
+  json += "\"available_snapshots\":" + String(available_snapshots) + ",";
+  json += "\"batteries\":[";
+  
+  for (int i = 0; i < 3; i++) {
+    if (i > 0) json += ",";
+    json += "{";
+    json += "\"id\":" + String(i) + ",";
+    json += "\"files\":" + String(file_counts[i]) + ",";
+    json += "\"hours\":" + String(hours_bat0 + hours_bat1 + hours_bat2, 1) + ",";
+    json += "\"percent\":" + String((i == 0 ? percent_bat0 : (i == 1 ? percent_bat1 : percent_bat2)), 1) + ",";
+    json += "\"filled\":" + String(flash_logs[i].filled ? "true" : "false") + ",";
+    json += "\"current_index\":" + String(flash_logs[i].current_index);
+    json += "}";
+  }
+  
+  json += "]";
+  json += "}";
+  
+  server.send(200, "application/json", json);
+}
+
 void handleRoot() {
   String html = "<!DOCTYPE html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>";
   html += "<title>Alix Blimp Battery Monitor</title>";
@@ -1301,7 +1361,7 @@ void handleRoot() {
   html += "<div class='card' id='b2'><h3>4S Battery</h3><div class='row'><span class='muted'>Tensione</span><strong><span id='b2v'>-</span> V</strong></div><div class='row-raw'><span class='muted'>RAW V:</span><span><span id='b2rv'>-</span> V (ADC: <span id='b2rva'>-</span>)</span></div><div class='row'><span class='muted'>Corrente</span><strong><span id='b2c'>-</span> A</strong></div><div class='row-raw'><span class='muted'>RAW I:</span><span><span id='b2rc'>-</span> V (ADC: <span id='b2rca'>-</span>)</span></div><div class='row'><span class='muted'>Potenza</span><strong><span id='b2p'>-</span> W</strong></div></div>";
   html += "<div class='card'><h3>Status Sistema</h3><div class='row'><span class='muted'>Frequenza Loop</span><strong><span id='lf'>-</span> Hz</strong></div><div class='row'><span class='muted'>Input Right</span><strong><span id='ir'>-</span> μs</strong></div><div class='row'><span class='muted'>Input Left</span><strong><span id='il'>-</span> μs</strong></div><div class='row'><span class='muted'>Input Under</span><strong><span id='iu'>-</span> μs</strong></div><div class='status-badges'><span class='badge' id='dr'><span>Dir Right</span><strong>-</strong></span><span class='badge' id='dl'><span>Dir Left</span><strong>-</strong></span><span class='badge'><span>Output Right</span><strong id='or'>- μs</strong></span><span class='badge'><span>Output Left</span><strong id='ol'>- μs</strong></span></div></div>";
   html += "</div>";
-  html += "<div class='footer'>Aggiornamento ogni 1s via <a href='/api'>/api</a> | <a href='/calibration'>Taratura</a> | <a href='/charts'>Grafici</a></div>";
+  html += "<div class='footer'>Aggiornamento ogni 1s via <a href='/api'>/api</a> | <a href='/calibration'>Taratura</a> | <a href='/charts'>Grafici</a> | <a href='/storage'>Storage</a></div>";
   html += "</div><script>(function(){function q(id){return document.getElementById(id)};function setText(id,val,dec){q(id).textContent=(typeof dec==='number'?Number(val).toFixed(dec):val)};function upd(d){for(var i=0;i<3;i++){setText('b'+i+'v',d.batteries[i].voltage,2);setText('b'+i+'c',d.batteries[i].current,2);setText('b'+i+'p',d.batteries[i].power,1);setText('b'+i+'rv',d.batteries[i].raw_voltage,3);setText('b'+i+'rva',d.batteries[i].raw_voltage_adc,0);setText('b'+i+'rc',d.batteries[i].raw_current,3);setText('b'+i+'rca',d.batteries[i].raw_current_adc,0);}setText('lf',d.loop_frequency,1);setText('ir',d.autopilot.motor_right);setText('il',d.autopilot.motor_left);setText('iu',d.autopilot.motor_under);var dr=d.autopilot.dir_right,dl=d.autopilot.dir_left;q('dr').className='badge '+(dr?'ok':'err');q('dr').lastElementChild.textContent=dr?'Forward':'Reverse';q('dl').className='badge '+(dl?'ok':'err');q('dl').lastElementChild.textContent=dl?'Forward':'Reverse';setText('or',d.motors.right_pwm+' μs');setText('ol',d.motors.left_pwm+' μs')}function tick(){fetch('/api',{cache:'no-store'}).then(function(r){return r.json()}).then(upd).catch(function(){}).finally(function(){setTimeout(tick,1000)})}tick()})();</script></body></html>";
   server.send(200, "text/html", html);
 }
@@ -1850,9 +1910,138 @@ void handleChartsPage() {
   html += "window.onload=function(){";
   html += "initCharts();";
   html += "update();";
-  html += "setInterval(function(){if(autoUpdate)update();},5000);";
+  html += "setInterval(function(){if(autoUpdate)update();},1000);";
   html += "};";
   html += "</script></body></html>";
+  server.send(200, "text/html", html);
+}
+
+void handleStoragePage() {
+  String html = "<!DOCTYPE html><html><head><meta charset='utf-8'><title>Storage - SPIFFS</title>";
+  html += "<meta name='viewport' content='width=device-width,initial-scale=1'>";
+  html += "<style>";
+  html += "body{font-family:Arial,sans-serif;background:#0b1220;color:#e6edf3;padding:20px;margin:0}";
+  html += ".container{max-width:900px;margin:0 auto}";
+  html += "h1{font-size:24px;margin-bottom:16px;color:#c9d1d9}";
+  html += ".card{background:#111827;border:1px solid #1f2937;border-radius:10px;padding:16px;margin:12px 0;box-shadow:0 2px 8px rgba(0,0,0,.25)}";
+  html += ".card h3{margin:0 0 12px;font-size:18px;color:#e5e7eb}";
+  html += ".info-row{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #1f2937}";
+  html += ".info-row:last-child{border-bottom:none}";
+  html += ".label{color:#94a3b8;font-size:14px}";
+  html += ".value{color:#e6edf3;font-size:14px;font-weight:600}";
+  html += ".progress-bar{width:100%;height:24px;background:#0f172a;border-radius:12px;overflow:hidden;margin:8px 0;position:relative}";
+  html += ".progress-fill{height:100%;background:linear-gradient(90deg,#10b981,#3b82f6);transition:width 0.3s}";
+  html += ".progress-text{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font-size:12px;font-weight:600;color:#fff}";
+  html += ".battery-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;margin:12px 0}";
+  html += ".stat{text-align:center;padding:8px}";
+  html += ".stat-value{font-size:28px;font-weight:700;color:#3b82f6;margin-bottom:4px}";
+  html += ".stat-label{font-size:12px;color:#94a3b8}";
+  html += ".btn{display:inline-block;padding:10px 20px;border-radius:6px;border:none;cursor:pointer;font-size:14px;margin:4px}";
+  html += ".btn-primary{background:#3b82f6;color:#fff}";
+  html += ".btn-danger{background:#ef4444;color:#fff}";
+  html += ".btn:hover{opacity:0.85}";
+  html += "a{color:#60a5fa;text-decoration:none}";
+  html += ".footer{margin-top:20px;font-size:12px;color:#94a3b8;text-align:center}";
+  html += ".warning{background:#422006;border:1px solid #f59e0b;color:#fbbf24;padding:12px;border-radius:6px;margin:12px 0;font-size:14px}";
+  html += "</style></head><body>";
+  html += "<div class='container'>";
+  html += "<h1>💾 Storage - SPIFFS</h1>";
+  
+  html += "<div class='card'>";
+  html += "<h3>Memoria Flash</h3>";
+  html += "<div class='info-row'><span class='label'>Totale:</span><span class='value' id='totalMem'>-</span></div>";
+  html += "<div class='info-row'><span class='label'>Usata:</span><span class='value' id='usedMem'>-</span></div>";
+  html += "<div class='info-row'><span class='label'>Libera:</span><span class='value' id='freeMem'>-</span></div>";
+  html += "<div class='progress-bar'><div class='progress-fill' id='progressBar' style='width:0%'></div><div class='progress-text' id='progressText'>0%</div></div>";
+  html += "<div class='info-row'><span class='label'>Snapshot disponibili:</span><span class='value' id='availSnap'>-</span></div>";
+  html += "<div class='info-row'><span class='label'>Dimensione snapshot:</span><span class='value' id='snapSize'>-</span></div>";
+  html += "</div>";
+  
+  html += "<div class='card'>";
+  html += "<h3>Log per Batteria</h3>";
+  html += "<div class='battery-grid'>";
+  html += "<div class='stat'><div class='stat-value' id='files0'>-</div><div class='stat-label'>6S#1 - File</div></div>";
+  html += "<div class='stat'><div class='stat-value' id='hours0'>-</div><div class='stat-label'>Ore registrate</div></div>";
+  html += "<div class='stat'><div class='stat-value' id='percent0'>-</div><div class='stat-label'>% Capacità</div></div>";
+  html += "</div>";
+  html += "<div class='battery-grid'>";
+  html += "<div class='stat'><div class='stat-value' id='files1'>-</div><div class='stat-label'>6S#2 - File</div></div>";
+  html += "<div class='stat'><div class='stat-value' id='hours1'>-</div><div class='stat-label'>Ore registrate</div></div>";
+  html += "<div class='stat'><div class='stat-value' id='percent1'>-</div><div class='stat-label'>% Capacità</div></div>";
+  html += "</div>";
+  html += "<div class='battery-grid'>";
+  html += "<div class='stat'><div class='stat-value' id='files2'>-</div><div class='stat-label'>4S - File</div></div>";
+  html += "<div class='stat'><div class='stat-value' id='hours2'>-</div><div class='stat-label'>Ore registrate</div></div>";
+  html += "<div class='stat'><div class='stat-value' id='percent2'>-</div><div class='stat-label'>% Capacità</div></div>";
+  html += "</div>";
+  html += "</div>";
+  
+  html += "<div id='warningBox' style='display:none' class='warning'>⚠️ La memoria è quasi piena! Quando raggiungerà il 100%, i nuovi dati non verranno più salvati.</div>";
+  
+  html += "<div class='card'>";
+  html += "<h3>Azioni</h3>";
+  html += "<button class='btn btn-primary' onclick='refreshData()'>🔄 Aggiorna</button>";
+  html += "<button class='btn btn-danger' onclick='clearLogs()'>🗑️ Cancella Tutti i Log</button>";
+  html += "</div>";
+  
+  html += "<div class='footer'><a href='/'>← Torna al Monitor</a> | <a href='/charts'>Grafici</a></div>";
+  html += "</div>";
+  
+  html += "<script>";
+  html += "function formatBytes(bytes){";
+  html += "if(bytes<1024)return bytes+' B';";
+  html += "if(bytes<1048576)return(bytes/1024).toFixed(1)+' KB';";
+  html += "return(bytes/1048576).toFixed(2)+' MB';";
+  html += "}";
+  html += "";
+  html += "function refreshData(){";
+  html += "fetch('/storage-info')";
+  html += ".then(r=>r.json())";
+  html += ".then(data=>{";
+  html += "document.getElementById('totalMem').textContent=formatBytes(data.total_bytes);";
+  html += "document.getElementById('usedMem').textContent=formatBytes(data.used_bytes);";
+  html += "document.getElementById('freeMem').textContent=formatBytes(data.free_bytes);";
+  html += "document.getElementById('availSnap').textContent=data.available_snapshots;";
+  html += "document.getElementById('snapSize').textContent=formatBytes(data.snapshot_size);";
+  html += "var percent=data.percent_used;";
+  html += "document.getElementById('progressBar').style.width=percent+'%';";
+  html += "document.getElementById('progressText').textContent=percent+'%';";
+  html += "if(percent>85){";
+  html += "document.getElementById('warningBox').style.display='block';";
+  html += "}else{";
+  html += "document.getElementById('warningBox').style.display='none';";
+  html += "}";
+  html += "for(var i=0;i<3;i++){";
+  html += "document.getElementById('files'+i).textContent=data.batteries[i].files;";
+  html += "document.getElementById('hours'+i).textContent=data.batteries[i].hours+'h';";
+  html += "document.getElementById('percent'+i).textContent=data.batteries[i].percent.toFixed(1)+'%';";
+  html += "}";
+  html += "})";
+  html += ".catch(e=>alert('Errore caricamento dati: '+e));";
+  html += "}";
+  html += "";
+  html += "function clearLogs(){";
+  html += "if(confirm('Sei sicuro di voler cancellare TUTTI i log? Questa operazione è irreversibile!')){";
+  html += "fetch('/clear-logs',{method:'POST'})";
+  html += ".then(r=>r.json())";
+  html += ".then(data=>{";
+  html += "if(data.status==='ok'){";
+  html += "alert('Log cancellati con successo!');";
+  html += "refreshData();";
+  html += "}else{";
+  html += "alert('Errore durante la cancellazione');";
+  html += "}";
+  html += "})";
+  html += ".catch(e=>alert('Errore: '+e));";
+  html += "}";
+  html += "}";
+  html += "";
+  html += "window.onload=function(){";
+  html += "refreshData();";
+  html += "setInterval(refreshData,5000);";
+  html += "};";
+  html += "</script></body></html>";
+  
   server.send(200, "text/html", html);
 }
 
@@ -2021,6 +2210,8 @@ void setup() {
   server.on("/clear-logs", HTTP_POST, handleClearLogs);
   server.on("/reset-calibration", HTTP_POST, handleResetCalibration);
   server.on("/csv", handleCSV);
+  server.on("/storage", HTTP_GET, handleStoragePage);
+  server.on("/storage-info", HTTP_GET, handleStorageInfo);
   server.begin();
   Serial.println("🌍 Web Server avviato");
   
