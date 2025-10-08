@@ -1,231 +1,190 @@
-# ESP32 Battery Monitor & Differential Motor Control
+# 🔋 ESP32 Battery Monitor v2.1 OPTIMIZED
 
-Sistema completo per monitoraggio batterie e controllo differenziale motori con ESP32 DEVKIT V1.
+Sistema professionale di monitoraggio batterie con storage 4 ore e visualizzazione ottimizzata.
 
-## 🎯 Funzionalità
+---
 
-- **Monitoraggio Batterie**: 3 pacchi (2x6S + 1x4S) con sensori corrente ACS758
-- **Controllo Differenziale**: 2 motori con direzione indipendente
-- **Interfaccia Autopilota**: 2 PWM input + 2 digital direction
-- **Telemetria**: Serial + Web Interface + API JSON
-- **WiFi**: Access Point per monitoraggio remoto
+## 🚀 QUICK START
 
-## 🔌 Pinout ESP32 DEVKIT V1
-
-### ADC Input (Sensori)
-- **GPIO32** - Corrente 6S#1 (ACS758)
-- **GPIO33** - Corrente 6S#2 (ACS758)
-- **GPIO34** - Corrente 4S (ACS758)
-- **GPIO35** - Tensione 6S#1 (Partitore)
-- **GPIO36** - Tensione 6S#2 (Partitore)
-- **GPIO39** - Tensione 4S (Partitore)
-
-### PWM Input (Autopilota)
-- **GPIO18** - Motore Destro (1000-2000μs)
-- **GPIO19** - Motore Sinistro (1000-2000μs)
-- **GPIO5** - Motori Sottostanti (1000-2000μs)
-
-### Digital Output (Direzione Motori)
-- **GPIO17** - Direzione Motore Sinistro (OUTPUT)
-- **GPIO21** - Direzione Motore Destro (OUTPUT)
-
-### PWM Output (Motori)
-- **GPIO26** - Motore Destro (ESC)
-- **GPIO27** - Motore Sinistro (ESC)
-
-## 🔧 Circuito Elettronico
-
-### Sensori Corrente ACS758-50A
-- **Sensibilità**: 40mV/A
-- **Range**: ±50A
-- **Alimentazione**: 3.3V-5V
-- **Output**: Analogico (VCC/2 = 0A)
-
-### Partitori Tensione
-- **6S Batterie**: R1=22kΩ, R2=3.9kΩ (Ratio 1:8.4)
-- **4S Batterie**: R1=15kΩ, R2=3.9kΩ (Ratio 1:5.6)
-- **Range ADC**: 0-3.3V (25.2V max per 6S, 16.8V max per 4S)
-
-### Filtri e Protezioni
-- **Condensatori**: 100nF su ogni input ADC
-- **Resistenze**: 1kΩ di protezione
-- **Pull-up**: Su input digitali (se necessari)
-
-## 📊 Algoritmo Controllo Motori
-
-### Logica PWM e Direzione
-```cpp
-// Input dall'autopilota: 1000-2000μs
-// 1500μs = neutro
-
-// Direzione AVANTI (1500-2000μs)
-if (input > 1500) {
-    pwm_output = map(input, 1500, 2000, 1000, 2000);
-    direction_pin = HIGH;  // ATTIVO
-}
-
-// Direzione INDIETRO (1000-1500μs)  
-if (input <= 1500) {
-    pwm_output = map(input, 1000, 1500, 2000, 1000);
-    direction_pin = LOW;   // DISATTIVO
-}
+### 1. Carica Firmware
+```
+Arduino IDE:
+- Apri: esp32_battery_monitor/esp32_battery_monitor.ino
+- Tools → Board → ESP32 Dev Module
+- Tools → Partition Scheme → "Default 4MB with spiffs"
+- Upload
 ```
 
-### Mappatura PWM
-| Input Autopilota | Range | DIR_PIN | PWM Output | Comportamento |
-|------------------|-------|---------|------------|---------------|
-| 2000μs | 1500-2000 | **HIGH** | 2000μs | Avanti massimo |
-| 1750μs | 1500-2000 | **HIGH** | 1500μs | Avanti medio |
-| 1500μs | 1500-2000 | **HIGH** | 1000μs | Neutro (avanti) |
-| 1500μs | 1000-1500 | **LOW** | 1000μs | Neutro (indietro) |
-| 1250μs | 1000-1500 | **LOW** | 1500μs | Indietro medio |
-| 1000μs | 1000-1500 | **LOW** | 2000μs | Indietro massimo |
-
-## 🌐 Interfaccia Web
-
-### Access Point WiFi
-- **SSID**: ESP32_BatteryMonitor
-- **Password**: battery123
-- **IP**: 192.168.4.1
-
-### Endpoints
-- **/** - Dashboard principale
-- **/api** - API JSON per telemetria
-- **/calibration** - Pagina taratura sensori
-- **/charts** - Grafici storici
-- **/charts-data** - Dati grafici JSON
-- **/csv** - Esportazione dati CSV
-
-### Esempio API Response
-```json
-{
-  "batteries": [
-    {"voltage": 25.1, "current": 2.3, "power": 57.7},
-    {"voltage": 24.8, "current": 1.9, "power": 47.1},
-    {"voltage": 16.5, "current": 0.8, "power": 13.2}
-  ],
-  "autopilot": {
-    "motor_right": 1650,
-    "motor_left": 1500,
-    "motor_under": 1500,
-    "dir_right": true,
-    "dir_left": true
-  },
-  "motors": {
-    "right_pwm": 1650,
-    "left_pwm": 1500
-  },
-  "loop_frequency": 125.5,
-  "uptime": 45000
-}
+### 2. Connetti e Usa
+```
+WiFi: "ESP32_BatteryMonitor" / "battery123"
+Browser: http://192.168.4.1
+Grafici: http://192.168.4.1/charts
 ```
 
-## 🚀 Installazione
+### 3. Leggi Documentazione
+👉 **[`docs/START_HERE.md`](docs/START_HERE.md)** - Inizia qui!
 
-### 1. Hardware
-- Collegare sensori ACS758 ai pin ADC (GPIO32,33,34)
-- Collegare partitori tensione ai pin ADC (GPIO35,36,39)
-- Collegare autopilota ai pin PWM input (GPIO18,19,5)
-- Collegare ESC motori ai pin PWM output (GPIO26,27)
-- Collegare pin direzione motori (GPIO17,21) - OUTPUT
+---
 
-### 2. Software
-1. Installare ESP32 Board Package in Arduino IDE
-2. Selezionare "ESP32 Dev Module"
-3. Caricare il codice `esp32_battery_monitor.ino`
-4. Configurare parametri se necessario
+## 📚 DOCUMENTAZIONE
 
-### 3. Configurazione
-```cpp
-// Modificare questi parametri se necessario
-#define ACS758_SENSITIVITY 0.04  // 40mV/A per 50A, 20mV/A per 100A
-#define DIVIDER_6S_RATIO   8.4   // Aggiustare se partitori diversi
-#define DIVIDER_4S_RATIO   5.6   // Aggiustare se partitori diversi
+### 📖 Tutta la documentazione è in [`docs/`](docs/)
+
+#### File Principali
+- **[START_HERE.md](docs/START_HERE.md)** ⭐ - Punto di partenza
+- **[RIEPILOGO_VELOCE_v2.1.md](docs/RIEPILOGO_VELOCE_v2.1.md)** ⭐ - Sintesi 3 minuti
+- **[GUIDA_UTENTE_v2.1.md](docs/GUIDA_UTENTE_v2.1.md)** ⭐⭐ - Manuale completo
+
+#### File HTML → PDF
+- **[DOCUMENTAZIONE_COMPLETA_v2.1.html](docs/DOCUMENTAZIONE_COMPLETA_v2.1.html)** ⭐⭐⭐ - Tutto in uno (genera PDF!)
+
+#### Guide Complete
+Vedi: **[docs/INDICE_DOCUMENTAZIONE_v2.1.md](docs/INDICE_DOCUMENTAZIONE_v2.1.md)**
+
+---
+
+## ⚡ CARATTERISTICHE v2.1
+
+- 📊 **Storage**: 4 ore @ 1Hz (14,400 campioni)
+- 💾 **Persistenza**: Flash SPIFFS (sopravvive riavvio)
+- 📈 **Scale**: 10 temporali (10s → 4h)
+- ⚡ **Grafici**: < 6s caricamento (decimazione auto)
+- 🔔 **Alert**: Memoria 90%, 100% + tempo rimanente
+- 📥 **Export**: CSV completo 16 parametri @ 1Hz
+- 🔄 **Rolling**: Continuo infinito
+
+---
+
+## 🎯 SPECIFICA TECNICA
+
+| Parametro | Valore |
+|-----------|--------|
+| **RAM Buffer** | 120 campioni (2 min @ 1Hz) |
+| **Flash Buffer** | 14,400 campioni (4h @ 1Hz) |
+| **Risoluzione** | 1 campione/secondo |
+| **Cattura Transitori** | ✅ Eventi > 500ms |
+| **RAM Usata** | 246 KB (53% libera) |
+| **Flash Usata** | 815 KB (80% libera) |
+| **Scale Disponibili** | 10 (10s, 30s, 1m, 2m, 5m, 10m, 30m, 1h, 2h, 4h) |
+
+---
+
+## 📊 DATI REGISTRATI
+
+### Per Ogni Batteria (×3)
+- Tensione calibrata (V)
+- Corrente calibrata (A)
+- Tensione raw (V)
+- Corrente raw (V)
+
+### PWM Motori (×3)
+- Motor Right (μs)
+- Motor Left (μs)
+- Motor Under (μs)
+
+### Metadata
+- Timestamp (ms)
+
+**Totale**: 16 parametri/campione
+
+---
+
+## 🌐 INTERFACCIA WEB
+
+- **Dashboard**: http://192.168.4.1
+- **Grafici**: http://192.168.4.1/charts
+- **Calibrazione**: http://192.168.4.1/calibration
+- **API JSON**: http://192.168.4.1/api
+- **Export CSV**: http://192.168.4.1/csv
+
+---
+
+## 🔌 HARDWARE
+
+### Pinout ESP32 DEVKIT V1
+
+**ADC Input (Sensori)**:
+- GPIO32, 33, 34 - Correnti (ACS758)
+- GPIO35, 36, 39 - Tensioni (Partitori)
+
+**PWM Input (Autopilota)**:
+- GPIO18, 19, 5 - Motori input
+
+**PWM Output (Motori)**:
+- GPIO26, 27 - Motori output
+
+**Digital Output (Direzioni)**:
+- GPIO17, 21 - Direzioni motori
+
+---
+
+## 📥 EXPORT CSV
+
+```
+http://192.168.4.1/csv           → Tutti i dati
+http://192.168.4.1/csv?type=ram  → Solo RAM (2 min)
+http://192.168.4.1/csv?type=flash → Solo Flash (4h)
 ```
 
-## 📈 Monitoraggio
+**Formato**: 17 colonne (16 dati + Source)  
+**Risoluzione**: 1Hz completo (nessuna decimazione)
 
-### Serial Monitor
-- Telemetria ogni 100ms
-- Dati batterie, autopilota, motori
-- Frequenza loop e statistiche
+---
 
-### Web Dashboard
-- Interfaccia grafica real-time
-- Dati batterie con colori
-- Status sistema completo
-- Auto-refresh ogni secondo
-- Pagina taratura sensori
-- Grafici storici con esportazione CSV
+## 🆘 SUPPORTO
 
-### API JSON
-- Endpoint `/api` per integrazione
-- Dati strutturati per applicazioni esterne
-- Formato JSON standard
+### Documentazione
+📚 **[docs/](docs/)** - Tutta la documentazione
 
-## ⚠️ Note Importanti
+### Quick Reference
+⚡ **[docs/RIEPILOGO_VELOCE_v2.1.md](docs/RIEPILOGO_VELOCE_v2.1.md)** - 3 minuti
 
-### Sicurezza
-- **Tensioni Alte**: 6S batterie = 25.2V max
-- **Correnti Alte**: Fino a 50A per sensore
-- **Isolamento**: Usare partitori resistivi
-- **Fusibili**: Proteggere circuiti
+### Manuale Completo
+📖 **[docs/GUIDA_UTENTE_v2.1.md](docs/GUIDA_UTENTE_v2.1.md)** - 15 minuti
 
-### Calibrazione
-- Verificare partitori con multimetro
-- Calibrare sensori corrente con carico noto
-- Testare range PWM con oscilloscopio
-- Validare direzioni motori
+### Formato PDF
+📄 **[docs/GENERA_PDF_ISTRUZIONI.md](docs/GENERA_PDF_ISTRUZIONI.md)** - Come generare PDF
 
-### Ottimizzazione
-- Aggiustare `ADC_SAMPLES` per stabilità
-- Modificare `TELEMETRY_INTERVAL` per frequenza
-- Regolare mixing factor per steering
-- Personalizzare WiFi credentials
+---
 
-## 🔧 Troubleshooting
+## 📦 STRUTTURA PROGETTO
 
-### Problemi Comuni
-1. **ADC instabile**: Aumentare `ADC_SAMPLES`
-2. **PWM non funziona**: Verificare frequenza ESC
-3. **WiFi non si connette**: Controllare SSID/password
-4. **Correnti errate**: Calibrare sensori ACS758
-5. **Motori non vanno indietro**: Verificare pin direzione (GPIO17,21)
-6. **Pin direzione non funzionano**: Controllare che siano configurati come OUTPUT
+```
+esp32-battery-monitor/
+├── config.h                      - Configurazione sistema
+├── esp32_battery_monitor/
+│   └── esp32_battery_monitor.ino - Firmware v2.1 OPTIMIZED
+└── docs/                         - 📚 TUTTA LA DOCUMENTAZIONE
+    ├── START_HERE.md             ⭐ Inizia qui
+    ├── GUIDA_UTENTE_v2.1.md      ⭐ Manuale completo
+    ├── DOCUMENTAZIONE_COMPLETA_v2.1.html  ⭐ PDF tutto-in-uno
+    └── ... altri 24 file
+```
 
-### Debug
-- Abilitare Serial Monitor a 115200 baud
-- Verificare connessioni hardware
-- Testare singoli componenti
-- Usare multimetro per validazione
+---
 
-## 📝 Changelog
+## 🎉 VERSIONE
 
-### v1.1.0 (Corrente)
-- ✅ **CORRETTO**: Pin direzione motori (GPIO17,21) ora funzionano correttamente
-- ✅ **CORRETTO**: Logica PWM per direzione avanti/indietro
-- ✅ **AGGIUNTO**: Debug seriale per monitoraggio motori
-- ✅ **AGGIUNTO**: Pagina taratura sensori avanzata
-- ✅ **AGGIUNTO**: Grafici storici con esportazione CSV
-- ✅ **AGGIUNTO**: Motore sottostanti (GPIO5)
-- ✅ **MIGLIORATO**: Algoritmo controllo motori semplificato
-- ✅ **MIGLIORATO**: Pinout aggiornato (GPIO26,27 per PWM output)
+**v2.1 OPTIMIZED** - Ottobre 2025
 
-### v1.0.0
-- Implementazione base sistema
-- Monitoraggio 3 batterie
-- Controllo differenziale motori
-- Interfaccia web e API
-- Telemetria completa
+### Novità v2.1
+- ⚡ Flash @ 1Hz (era 0.1Hz) - **+900% risoluzione**
+- ⚡ Decimazione grafici - **-70% tempo caricamento**
+- ⚡ Alert memoria - Proattivi 90%/100%
+- ⚡ RAM ottimizzata - 2 min (era 5)
+- ⚡ 10 scale temporali (era 7)
 
-## 📄 Licenza
+### Changelog Completo
+📝 **[docs/CHANGELOG_v2.1.md](docs/CHANGELOG_v2.1.md)**
 
-Progetto di supporto al Drone Dirigibile AlixBlimp
+---
 
-## 🤝 Contributi
+## 📄 LICENZA
 
-Benvenuti contributi per:
-- Miglioramenti algoritmi
-- Nuove funzionalità
-- Ottimizzazioni performance
-- Documentazione
+Progetto AlixBlimp BMS  
+© 2025
+
+---
+
+**Inizia con**: [`docs/START_HERE.md`](docs/START_HERE.md) 🚀

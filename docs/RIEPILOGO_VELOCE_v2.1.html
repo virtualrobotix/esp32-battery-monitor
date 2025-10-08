@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="" xml:lang="">
+<head>
+  <meta charset="utf-8" />
+  <meta name="generator" content="pandoc" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
+  <title>ESP32 Battery Monitor v2.1 - Riepilogo Veloce</title>
+  <style>
+    /* Default styles provided by pandoc.
+    ** See https://pandoc.org/MANUAL.html#variables-for-html for config info.
+    */
+    code{white-space: pre-wrap;}
+    span.smallcaps{font-variant: small-caps;}
+    div.columns{display: flex; gap: min(4vw, 1.5em);}
+    div.column{flex: auto; overflow-x: auto;}
+    div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+    /* The extra [class] is a hack that increases specificity enough to
+       override a similar rule in reveal.js */
+    ul.task-list[class]{list-style: none;}
+    ul.task-list li input[type="checkbox"] {
+      font-size: inherit;
+      width: 0.8em;
+      margin: 0 0.8em 0.2em -1.6em;
+      vertical-align: middle;
+    }
+    .display.math{display: block; text-align: center; margin: 0.5rem auto;}
+  </style>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/github-markdown-css@5/github-markdown.min.css" />
+</head>
+<body>
+<header id="title-block-header">
+<h1 class="title">ESP32 Battery Monitor v2.1 - Riepilogo Veloce</h1>
+</header>
+<h1 id="riepilogo-veloce-v2.1---sistema-storage-e-grafici">⚡ RIEPILOGO
+VELOCE v2.1 - Sistema Storage e Grafici</h1>
+<h2 id="in-breve">🎯 IN BREVE</h2>
+<p><strong>ESP32 Battery Monitor v2.1 OPTIMIZED</strong> registra
+<strong>4 ore</strong> di dati @ <strong>1Hz</strong> con
+visualizzazione veloce e persistenza completa.</p>
+<hr />
+<h2 id="storage-e-visualizzazione">📊 STORAGE E VISUALIZZAZIONE</h2>
+<h3 id="due-livelli-di-memoria">💾 Due Livelli di Memoria</h3>
+<h4 id="ram-ultimi-2-minuti">RAM (Ultimi 2 Minuti)</h4>
+<ul>
+<li><strong>Capacità</strong>: 120 campioni</li>
+<li><strong>Frequenza</strong>: 1 campione/secondo</li>
+<li><strong>Uso</strong>: Visualizzazione real-time veloce</li>
+<li><strong>Persistenza</strong>: ❌ Volatile (perso al riavvio)</li>
+</ul>
+<h4 id="flash-ultimi-4-ore">Flash (Ultimi 4 Ore)</h4>
+<ul>
+<li><strong>Capacità</strong>: 14,400 campioni<br />
+</li>
+<li><strong>Frequenza</strong>: 1 campione/secondo</li>
+<li><strong>Uso</strong>: Storico lungo termine</li>
+<li><strong>Persistenza</strong>: ✅ Sopravvive a riavvio! 🎉</li>
+</ul>
+<hr />
+<h2 id="scale-temporali-10-totali">📈 SCALE TEMPORALI (10 totali)</h2>
+<h3 id="veloci-ram---1s-caricamento">Veloci (RAM - &lt; 1s
+caricamento)</h3>
+<ul>
+<li><strong>10 secondi</strong> → 10 campioni @ 1Hz</li>
+<li><strong>30 secondi</strong> → 30 campioni @ 1Hz</li>
+<li><strong>1 minuto</strong> → 60 campioni @ 1Hz ⭐
+<strong>DEFAULT</strong></li>
+<li><strong>2 minuti</strong> → 120 campioni @ 1Hz</li>
+</ul>
+<h3 id="medie-flash---2-3s-caricamento">Medie (Flash - 2-3s
+caricamento)</h3>
+<ul>
+<li><strong>5 minuti</strong> → 300 campioni @ 1Hz</li>
+<li><strong>10 minuti</strong> → 600 campioni @ 1Hz</li>
+</ul>
+<h3 id="lunghe-flash---3-6s-caricamento">Lunghe (Flash - 3-6s
+caricamento)</h3>
+<ul>
+<li><strong>30 minuti</strong> → 600 punti (decimato 3x)</li>
+<li><strong>1 ora</strong> → 360 punti (decimato 10x)</li>
+<li><strong>2 ore</strong> → 720 punti (decimato 10x)</li>
+<li><strong>4 ore</strong> → 1,440 punti (decimato 10x)</li>
+</ul>
+<hr />
+<h2 id="decimazione-intelligente">⚡ DECIMAZIONE INTELLIGENTE</h2>
+<h3 id="cosè">Cos’è?</h3>
+<p>Per grafici lunghi, mostra solo punti necessari per velocizzare senza
+perdere qualità.</p>
+<h3 id="quando-si-attiva">Quando Si Attiva?</h3>
+<ul>
+<li><strong>≤10 minuti</strong>: Nessuna decimazione (tutti i punti @
+1Hz)</li>
+<li><strong>30 minuti</strong>: Decimazione 3x (1 punto ogni 3s)</li>
+<li><strong>≥1 ora</strong>: Decimazione 10x (1 punto ogni 10s)</li>
+</ul>
+<h3 id="velocità">Velocità</h3>
+<ul>
+<li><strong>Scala 4h senza</strong>: ~21 secondi 🔴</li>
+<li><strong>Scala 4h con</strong>: <strong>~6 secondi</strong> ✅
+<strong>(-71%)</strong></li>
+</ul>
+<h3 id="qualità">Qualità</h3>
+<p><strong>Identica!</strong> La decimazione elimina solo ridondanza
+invisibile.</p>
+<hr />
+<h2 id="alert-memoria">🔔 ALERT MEMORIA</h2>
+<h3 id="alert-90-dopo-3h-36min">⚠️ Alert 90% (dopo 3h 36min)</h3>
+<pre><code>Serial + Web: &quot;Scarica dati! 24 minuti rimasti&quot;
+Colore: Arancione</code></pre>
+<h3 id="alert-100-dopo-4h">🔴 Alert 100% (dopo 4h)</h3>
+<pre><code>Serial + Web: &quot;MEMORIA PIENA! Sovrascrivendo vecchi dati&quot;
+Colore: Rosso + Popup</code></pre>
+<h3 id="rolling-mode">♾️ Rolling Mode</h3>
+<p>Dopo 4 ore continua infinitamente sovrescrivendo dati più vecchi.</p>
+<hr />
+<h2 id="export-csv">📥 EXPORT CSV</h2>
+<h3 id="come-scaricare">Come Scaricare</h3>
+<pre><code>http://192.168.4.1/csv</code></pre>
+<h3 id="contenuto">Contenuto</h3>
+<ul>
+<li><strong>Tutti i dati</strong> @ 1Hz (nessuna decimazione)</li>
+<li><strong>14,400 campioni</strong> max (4 ore)</li>
+<li><strong>16 parametri</strong> per campione</li>
+<li><strong>Dimensione</strong>: ~1.2 MB</li>
+</ul>
+<h3 id="cosa-include">Cosa Include</h3>
+<ul>
+<li>✅ Tensioni 3 batterie (calibrate + raw)</li>
+<li>✅ Correnti 3 batterie (calibrate + raw)</li>
+<li>✅ PWM 3 motori</li>
+<li>✅ Timestamp assoluto</li>
+<li>✅ Etichetta sorgente (Flash/RAM)</li>
+</ul>
+<hr />
+<h2 id="come-usare">🎯 COME USARE</h2>
+<h3 id="monitoring-volo">Monitoring Volo</h3>
+<pre><code>1. Vai su: http://192.168.4.1/charts
+2. Scala: &quot;1m&quot; (default)
+3. Vedi ultimo minuto in tempo reale
+4. Auto-refresh: ogni 5s</code></pre>
+<h3 id="analisi-dopo-volo">Analisi Dopo Volo</h3>
+<pre><code>1. Atterra
+2. Scala: &quot;4h&quot; (overview completo)
+3. Identifica anomalie
+4. Zoom: Scala &quot;5m&quot; su zona interessante
+5. Export CSV per analisi dettagliata</code></pre>
+<h3 id="prima-nuova-missione">Prima Nuova Missione</h3>
+<pre><code>1. Se memoria &gt;90%: Scarica CSV
+2. Click: 🗑️ Azzera Tutto
+3. Conferma reset
+4. Memoria pronta! ✅</code></pre>
+<hr />
+<h2 id="dati-registrati">📊 DATI REGISTRATI</h2>
+<p><strong>16 parametri ogni secondo</strong>:</p>
+<h3 id="batterie-3">Batterie (×3)</h3>
+<ul>
+<li>Tensione calibrata (V)</li>
+<li>Corrente calibrata (A)</li>
+<li>Tensione raw (V)</li>
+<li>Corrente raw (V)</li>
+</ul>
+<h3 id="motori-3">Motori (×3)</h3>
+<ul>
+<li>PWM Right (μs)</li>
+<li>PWM Left (μs)</li>
+<li>PWM Under (μs)</li>
+</ul>
+<h3 id="timestamp">Timestamp</h3>
+<ul>
+<li>Millisecondi dall’avvio</li>
+</ul>
+<hr />
+<h2 id="performance">⚡ PERFORMANCE</h2>
+<table>
+<thead>
+<tr>
+<th>Operazione</th>
+<th>Tempo</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Caricamento scala 10s-2m</td>
+<td>&lt; 1s ⚡⚡⚡</td>
+</tr>
+<tr>
+<td>Caricamento scala 5m-10m</td>
+<td>2-3s ⚡⚡</td>
+</tr>
+<tr>
+<td>Caricamento scala 30m-4h</td>
+<td>4-6s ⚡</td>
+</tr>
+<tr>
+<td>Export CSV (4h)</td>
+<td>10-15s</td>
+</tr>
+<tr>
+<td>Salvataggio Flash</td>
+<td>Automatico ogni 1s</td>
+</tr>
+<tr>
+<td>Aggiornamento grafico</td>
+<td>Ogni 5s (auto)</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="memoria">💾 MEMORIA</h2>
+<table>
+<thead>
+<tr>
+<th>Risorsa</th>
+<th>Usata</th>
+<th>Totale</th>
+<th>Libera</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>RAM</td>
+<td>246 KB</td>
+<td>520 KB</td>
+<td><strong>274 KB (53%)</strong> ✅</td>
+</tr>
+<tr>
+<td>Flash</td>
+<td>815 KB</td>
+<td>4 MB</td>
+<td><strong>3,281 KB (80%)</strong> ✅</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Margine eccellente per future espansioni!</strong> 🎉</p>
+<hr />
+<h2 id="documenti-disponibili">📚 DOCUMENTI DISPONIBILI</h2>
+<h3 id="per-iniziare">Per Iniziare</h3>
+<p>👉 <strong><a
+href="GUIDA_UTENTE_v2.1.md">GUIDA_UTENTE_v2.1.md</a></strong> - Manuale
+completo</p>
+<h3 id="per-dettagli-tecnici">Per Dettagli Tecnici</h3>
+<p>👉 <strong><a
+href="RIEPILOGO_IMPLEMENTAZIONE.md">RIEPILOGO_IMPLEMENTAZIONE.md</a></strong>
+- Implementazione</p>
+<h3 id="per-ottimizzazioni">Per Ottimizzazioni</h3>
+<p>👉 <strong><a
+href="DECIMAZIONE_GRAFICI.md">DECIMAZIONE_GRAFICI.md</a></strong> -
+Performance 👉 <strong><a
+href="OTTIMIZZAZIONE_STORAGE.md">OTTIMIZZAZIONE_STORAGE.md</a></strong>
+- Storage</p>
+<h3 id="per-modifiche">Per Modifiche</h3>
+<p>👉 <strong><a href="CHANGELOG_v2.1.md">CHANGELOG_v2.1.md</a></strong>
+- Cosa è cambiato</p>
+<hr />
+<h2 id="checklist-rapida">✅ CHECKLIST RAPIDA</h2>
+<p>Prima del volo: - [ ] Firmware v2.1 caricato - [ ] Serial: “v2.1
+OPTIMIZED” visibile - [ ] Memoria &lt;50% (o azzerata) - [ ] Grafici
+funzionanti - [ ] WiFi raggiungibile</p>
+<p>Durante volo: - [ ] Sistema registra automaticamente - [ ]
+(Opzionale) Monitoring real-time</p>
+<p>Dopo volo: - [ ] Scarica CSV immediatamente - [ ] Backup file
+localmente - [ ] Analisi con Excel/Python - [ ] (Opzionale) Azzera
+dati</p>
+<hr />
+<h2 id="caratteristiche-chiave">🚀 CARATTERISTICHE CHIAVE</h2>
+<h3 id="cosa-fa-bene">✅ Cosa Fa Bene</h3>
+<ul>
+<li>⚡ <strong>Cattura transitori</strong> corrente/PWM (1s
+risoluzione)</li>
+<li>💾 <strong>4 ore storage</strong> persistente</li>
+<li>🔄 <strong>Rolling infinito</strong> automatico</li>
+<li>⚠️ <strong>Alert proattivi</strong> memoria</li>
+<li>📊 <strong>10 scale</strong> temporali ottimizzate</li>
+<li>📥 <strong>Export completo</strong> CSV @ 1Hz</li>
+<li>⚡ <strong>Grafici veloci</strong> (&lt; 6s tutte scale)</li>
+</ul>
+<h3 id="limitazioni">⚠️ Limitazioni</h3>
+<ul>
+<li><strong>Risoluzione minima</strong>: 1 secondo (eventi &lt;500ms
+persi)</li>
+<li><strong>Durata massima</strong>: 4 ore (poi rolling)</li>
+<li><strong>After 4h</strong>: Dati vecchi sovrascritti (scarica
+prima!)</li>
+</ul>
+<hr />
+<h2 id="tip-dellesperto">💡 TIP DELL’ESPERTO</h2>
+<h3 id="massimizza-uso-sistema">Massimizza Uso Sistema</h3>
+<ol type="1">
+<li><strong>Scarica CSV ogni missione</strong> - Archivio completo</li>
+<li><strong>Usa scala appropriata</strong> - 1m per real-time, 4h per
+overview</li>
+<li><strong>Monitora alert</strong> - Scarica prima del 100%</li>
+<li><strong>Analizza offline</strong> - CSV in Python/MATLAB</li>
+<li><strong>Backup regolare</strong> - Non perdere dati importanti</li>
+</ol>
+<hr />
+<h2 id="risultato-finale">🎉 RISULTATO FINALE</h2>
+<p><strong>Sistema professionale</strong> con: - ✅ 4 ore storage @ 1Hz
+- ✅ Visualizzazione veloce (&lt; 6s) - ✅ Persistenza dati - ✅ Alert
+intelligenti - ✅ Decimazione ottimizzata - ✅ Export CSV completo</p>
+<p><strong>Pronto per missioni professionali!</strong> 🚀📊💾</p>
+<hr />
+<p><strong>Leggi la guida completa</strong>: <a
+href="GUIDA_UTENTE_v2.1.md"><code>GUIDA_UTENTE_v2.1.md</code></a></p>
+</body>
+</html>

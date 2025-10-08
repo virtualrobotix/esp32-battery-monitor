@@ -1,0 +1,520 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="" xml:lang="">
+<head>
+  <meta charset="utf-8" />
+  <meta name="generator" content="pandoc" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
+  <title>ESP32 Battery Monitor v2.1 - Ottimizzazione Storage</title>
+  <style>
+    /* Default styles provided by pandoc.
+    ** See https://pandoc.org/MANUAL.html#variables-for-html for config info.
+    */
+    code{white-space: pre-wrap;}
+    span.smallcaps{font-variant: small-caps;}
+    div.columns{display: flex; gap: min(4vw, 1.5em);}
+    div.column{flex: auto; overflow-x: auto;}
+    div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+    /* The extra [class] is a hack that increases specificity enough to
+       override a similar rule in reveal.js */
+    ul.task-list[class]{list-style: none;}
+    ul.task-list li input[type="checkbox"] {
+      font-size: inherit;
+      width: 0.8em;
+      margin: 0 0.8em 0.2em -1.6em;
+      vertical-align: middle;
+    }
+    .display.math{display: block; text-align: center; margin: 0.5rem auto;}
+    /* CSS for syntax highlighting */
+    html { -webkit-text-size-adjust: 100%; }
+    pre > code.sourceCode { white-space: pre; position: relative; }
+    pre > code.sourceCode > span { display: inline-block; line-height: 1.25; }
+    pre > code.sourceCode > span:empty { height: 1.2em; }
+    .sourceCode { overflow: visible; }
+    code.sourceCode > span { color: inherit; text-decoration: inherit; }
+    div.sourceCode { margin: 1em 0; }
+    pre.sourceCode { margin: 0; }
+    @media screen {
+    div.sourceCode { overflow: auto; }
+    }
+    @media print {
+    pre > code.sourceCode { white-space: pre-wrap; }
+    pre > code.sourceCode > span { text-indent: -5em; padding-left: 5em; }
+    }
+    pre.numberSource code
+      { counter-reset: source-line 0; }
+    pre.numberSource code > span
+      { position: relative; left: -4em; counter-increment: source-line; }
+    pre.numberSource code > span > a:first-child::before
+      { content: counter(source-line);
+        position: relative; left: -1em; text-align: right; vertical-align: baseline;
+        border: none; display: inline-block;
+        -webkit-touch-callout: none; -webkit-user-select: none;
+        -khtml-user-select: none; -moz-user-select: none;
+        -ms-user-select: none; user-select: none;
+        padding: 0 4px; width: 4em;
+        color: #aaaaaa;
+      }
+    pre.numberSource { margin-left: 3em; border-left: 1px solid #aaaaaa;  padding-left: 4px; }
+    div.sourceCode
+      {   }
+    @media screen {
+    pre > code.sourceCode > span > a:first-child::before { text-decoration: underline; }
+    }
+    code span.al { color: #ff0000; font-weight: bold; } /* Alert */
+    code span.an { color: #60a0b0; font-weight: bold; font-style: italic; } /* Annotation */
+    code span.at { color: #7d9029; } /* Attribute */
+    code span.bn { color: #40a070; } /* BaseN */
+    code span.bu { color: #008000; } /* BuiltIn */
+    code span.cf { color: #007020; font-weight: bold; } /* ControlFlow */
+    code span.ch { color: #4070a0; } /* Char */
+    code span.cn { color: #880000; } /* Constant */
+    code span.co { color: #60a0b0; font-style: italic; } /* Comment */
+    code span.cv { color: #60a0b0; font-weight: bold; font-style: italic; } /* CommentVar */
+    code span.do { color: #ba2121; font-style: italic; } /* Documentation */
+    code span.dt { color: #902000; } /* DataType */
+    code span.dv { color: #40a070; } /* DecVal */
+    code span.er { color: #ff0000; font-weight: bold; } /* Error */
+    code span.ex { } /* Extension */
+    code span.fl { color: #40a070; } /* Float */
+    code span.fu { color: #06287e; } /* Function */
+    code span.im { color: #008000; font-weight: bold; } /* Import */
+    code span.in { color: #60a0b0; font-weight: bold; font-style: italic; } /* Information */
+    code span.kw { color: #007020; font-weight: bold; } /* Keyword */
+    code span.op { color: #666666; } /* Operator */
+    code span.ot { color: #007020; } /* Other */
+    code span.pp { color: #bc7a00; } /* Preprocessor */
+    code span.sc { color: #4070a0; } /* SpecialChar */
+    code span.ss { color: #bb6688; } /* SpecialString */
+    code span.st { color: #4070a0; } /* String */
+    code span.va { color: #19177c; } /* Variable */
+    code span.vs { color: #4070a0; } /* VerbatimString */
+    code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } /* Warning */
+  </style>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/github-markdown-css@5/github-markdown.min.css" />
+</head>
+<body>
+<header id="title-block-header">
+<h1 class="title">ESP32 Battery Monitor v2.1 - Ottimizzazione
+Storage</h1>
+</header>
+<h1 id="ottimizzazione-storage---frequenza-e-gestione-memoria">🚀
+OTTIMIZZAZIONE STORAGE - Frequenza e Gestione Memoria</h1>
+<h2 id="obiettivi">🎯 OBIETTIVI</h2>
+<ol type="1">
+<li>✅ Visualizzare <strong>ultimo minuto</strong> (non 5 minuti)</li>
+<li>✅ Storage Flash <strong>4 ore</strong> @ 1Hz (non 0.1Hz)</li>
+<li>✅ <strong>Cogliere transitori</strong> corrente/tensione al cambio
+PWM</li>
+<li>✅ <strong>Rolling/Circolare</strong> - continua dopo riavvio</li>
+<li>✅ <strong>Indicatore memoria full</strong> con alert scarica
+dati</li>
+</ol>
+<hr />
+<h2 id="configurazione-ottimizzata">📊 CONFIGURAZIONE OTTIMIZZATA</h2>
+<h3 id="parametri-raccomandati">Parametri Raccomandati</h3>
+<div class="sourceCode" id="cb1"><pre
+class="sourceCode cpp"><code class="sourceCode cpp"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="co">// ============ RAM BUFFER (Visualizzazione Real-Time) ============</span></span>
+<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a><span class="pp">#define RAM_BUFFER_SIZE </span><span class="dv">120</span><span class="pp">         </span><span class="co">// 2 minuti @ 1Hz (era 300)</span></span>
+<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a><span class="pp">#define RAM_UPDATE_INTERVAL </span><span class="dv">1000</span><span class="pp">    </span><span class="co">// 1 secondo (invariato)</span></span>
+<span id="cb1-4"><a href="#cb1-4" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-5"><a href="#cb1-5" aria-hidden="true" tabindex="-1"></a><span class="co">// ============ FLASH BUFFER (Storage Lungo Termine) ============</span></span>
+<span id="cb1-6"><a href="#cb1-6" aria-hidden="true" tabindex="-1"></a><span class="pp">#define LONG_TERM_MAX_POINTS </span><span class="dv">14400</span><span class="pp">       </span><span class="co">// 4 ore @ 1Hz (era 1440)</span></span>
+<span id="cb1-7"><a href="#cb1-7" aria-hidden="true" tabindex="-1"></a><span class="pp">#define LONG_TERM_SAVE_INTERVAL </span><span class="dv">1000</span><span class="pp">     </span><span class="co">// 1 secondo (era 10000)</span></span>
+<span id="cb1-8"><a href="#cb1-8" aria-hidden="true" tabindex="-1"></a><span class="pp">#define LONG_TERM_FILE </span><span class="st">&quot;/data.bin&quot;</span></span>
+<span id="cb1-9"><a href="#cb1-9" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-10"><a href="#cb1-10" aria-hidden="true" tabindex="-1"></a><span class="co">// ============ MEMORIA FULL ALERTS ============</span></span>
+<span id="cb1-11"><a href="#cb1-11" aria-hidden="true" tabindex="-1"></a><span class="pp">#define STORAGE_WARNING_PERCENT </span><span class="fl">90.0</span><span class="pp">     </span><span class="co">// Alert al 90%</span></span>
+<span id="cb1-12"><a href="#cb1-12" aria-hidden="true" tabindex="-1"></a><span class="pp">#define STORAGE_FULL_PERCENT </span><span class="fl">100.0</span><span class="pp">       </span><span class="co">// Full al 100%</span></span></code></pre></div>
+<hr />
+<h2 id="calcoli-memoria">💾 CALCOLI MEMORIA</h2>
+<h3 id="ram-buffer-2-minuti">RAM Buffer (2 minuti)</h3>
+<pre><code>Campioni: 120 (era 300)
+Grafici: 8 array
+Memoria: 120 × 8 × 4 bytes = 3,840 bytes = 3.75 KB
+Risparmio: 9.6 - 3.75 = 5.85 KB liberi in più! ✅</code></pre>
+<h3 id="flash-buffer-4-ore-1hz">Flash Buffer (4 ore @ 1Hz)</h3>
+<pre><code>Campioni: 14,400 (era 1,440)
+Bytes/campione: 58 bytes
+Memoria: 14,400 × 58 = 835,200 bytes = 815 KB
+SPIFFS: 4 MB = 4,096 KB
+Uso: 815 / 4096 = 19.9% ✅
+Liberi: 3,281 KB (80.1%) ✅✅✅</code></pre>
+<hr />
+<h2 id="modifiche-codice">🔧 MODIFICHE CODICE</h2>
+<h3 id="costanti-storage-allinizio-del-file">1. Costanti Storage
+(All’inizio del file)</h3>
+<div class="sourceCode" id="cb4"><pre
+class="sourceCode cpp"><code class="sourceCode cpp"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a><span class="co">// Strutture per Grafici (RIDOTTO da 300 a 120)</span></span>
+<span id="cb4-2"><a href="#cb4-2" aria-hidden="true" tabindex="-1"></a><span class="kw">struct</span> ChartData <span class="op">{</span></span>
+<span id="cb4-3"><a href="#cb4-3" aria-hidden="true" tabindex="-1"></a>  <span class="dt">float</span> values<span class="op">[</span><span class="dv">120</span><span class="op">];</span>        <span class="co">// 2 minuti @ 1Hz (era 300)</span></span>
+<span id="cb4-4"><a href="#cb4-4" aria-hidden="true" tabindex="-1"></a>  <span class="dt">int</span> index<span class="op">;</span></span>
+<span id="cb4-5"><a href="#cb4-5" aria-hidden="true" tabindex="-1"></a>  <span class="dt">bool</span> filled<span class="op">;</span></span>
+<span id="cb4-6"><a href="#cb4-6" aria-hidden="true" tabindex="-1"></a>  <span class="dt">unsigned</span> <span class="dt">long</span> last_update<span class="op">;</span></span>
+<span id="cb4-7"><a href="#cb4-7" aria-hidden="true" tabindex="-1"></a>  <span class="dt">float</span> min_value<span class="op">;</span></span>
+<span id="cb4-8"><a href="#cb4-8" aria-hidden="true" tabindex="-1"></a>  <span class="dt">float</span> max_value<span class="op">;</span></span>
+<span id="cb4-9"><a href="#cb4-9" aria-hidden="true" tabindex="-1"></a>  <span class="dt">float</span> avg_value<span class="op">;</span></span>
+<span id="cb4-10"><a href="#cb4-10" aria-hidden="true" tabindex="-1"></a>  <span class="dt">unsigned</span> <span class="dt">long</span> total_samples<span class="op">;</span></span>
+<span id="cb4-11"><a href="#cb4-11" aria-hidden="true" tabindex="-1"></a><span class="op">};</span></span>
+<span id="cb4-12"><a href="#cb4-12" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb4-13"><a href="#cb4-13" aria-hidden="true" tabindex="-1"></a><span class="co">// Storage lungo termine (AUMENTATO)</span></span>
+<span id="cb4-14"><a href="#cb4-14" aria-hidden="true" tabindex="-1"></a><span class="pp">#define LONG_TERM_FILE </span><span class="st">&quot;/data.bin&quot;</span></span>
+<span id="cb4-15"><a href="#cb4-15" aria-hidden="true" tabindex="-1"></a><span class="pp">#define LONG_TERM_MAX_POINTS </span><span class="dv">14400</span><span class="pp">     </span><span class="co">// 4 ore @ 1Hz (era 1440)</span></span>
+<span id="cb4-16"><a href="#cb4-16" aria-hidden="true" tabindex="-1"></a><span class="pp">#define LONG_TERM_SAVE_INTERVAL </span><span class="dv">1000</span><span class="pp">   </span><span class="co">// 1 secondo (era 10000)</span></span>
+<span id="cb4-17"><a href="#cb4-17" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb4-18"><a href="#cb4-18" aria-hidden="true" tabindex="-1"></a><span class="co">// Alert memoria</span></span>
+<span id="cb4-19"><a href="#cb4-19" aria-hidden="true" tabindex="-1"></a><span class="pp">#define STORAGE_WARNING_PERCENT </span><span class="fl">90.0</span></span>
+<span id="cb4-20"><a href="#cb4-20" aria-hidden="true" tabindex="-1"></a><span class="pp">#define STORAGE_FULL_PERCENT </span><span class="fl">100.0</span></span>
+<span id="cb4-21"><a href="#cb4-21" aria-hidden="true" tabindex="-1"></a><span class="dt">bool</span> warningShown <span class="op">=</span> <span class="kw">false</span><span class="op">;</span></span>
+<span id="cb4-22"><a href="#cb4-22" aria-hidden="true" tabindex="-1"></a><span class="dt">bool</span> fullWarningShown <span class="op">=</span> <span class="kw">false</span><span class="op">;</span></span></code></pre></div>
+<hr />
+<h3 id="funzioni-gestione-memoria">2. Funzioni Gestione Memoria</h3>
+<div class="sourceCode" id="cb5"><pre
+class="sourceCode cpp"><code class="sourceCode cpp"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a><span class="co">// Verifica stato memoria</span></span>
+<span id="cb5-2"><a href="#cb5-2" aria-hidden="true" tabindex="-1"></a><span class="dt">bool</span> isStorageFull<span class="op">()</span> <span class="op">{</span></span>
+<span id="cb5-3"><a href="#cb5-3" aria-hidden="true" tabindex="-1"></a>  <span class="cf">return</span> longTermStorage<span class="op">.</span>total_points <span class="op">&gt;=</span> LONG_TERM_MAX_POINTS<span class="op">;</span></span>
+<span id="cb5-4"><a href="#cb5-4" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span>
+<span id="cb5-5"><a href="#cb5-5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-6"><a href="#cb5-6" aria-hidden="true" tabindex="-1"></a><span class="dt">float</span> getStorageUsagePercent<span class="op">()</span> <span class="op">{</span></span>
+<span id="cb5-7"><a href="#cb5-7" aria-hidden="true" tabindex="-1"></a>  <span class="cf">if</span> <span class="op">(</span>LONG_TERM_MAX_POINTS <span class="op">==</span> <span class="dv">0</span><span class="op">)</span> <span class="cf">return</span> <span class="fl">0.0</span><span class="op">;</span></span>
+<span id="cb5-8"><a href="#cb5-8" aria-hidden="true" tabindex="-1"></a>  <span class="cf">return</span> <span class="op">(</span>longTermStorage<span class="op">.</span>total_points <span class="op">*</span> <span class="fl">100.0</span><span class="op">)</span> <span class="op">/</span> LONG_TERM_MAX_POINTS<span class="op">;</span></span>
+<span id="cb5-9"><a href="#cb5-9" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span>
+<span id="cb5-10"><a href="#cb5-10" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-11"><a href="#cb5-11" aria-hidden="true" tabindex="-1"></a><span class="dt">unsigned</span> <span class="dt">long</span> getStorageTimeRemaining<span class="op">()</span> <span class="op">{</span></span>
+<span id="cb5-12"><a href="#cb5-12" aria-hidden="true" tabindex="-1"></a>  <span class="cf">if</span> <span class="op">(</span>isStorageFull<span class="op">())</span> <span class="cf">return</span> <span class="dv">0</span><span class="op">;</span></span>
+<span id="cb5-13"><a href="#cb5-13" aria-hidden="true" tabindex="-1"></a>  <span class="dt">int</span> remaining <span class="op">=</span> LONG_TERM_MAX_POINTS <span class="op">-</span> longTermStorage<span class="op">.</span>total_points<span class="op">;</span></span>
+<span id="cb5-14"><a href="#cb5-14" aria-hidden="true" tabindex="-1"></a>  <span class="cf">return</span> remaining<span class="op">;</span> <span class="co">// secondi rimanenti</span></span>
+<span id="cb5-15"><a href="#cb5-15" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span>
+<span id="cb5-16"><a href="#cb5-16" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-17"><a href="#cb5-17" aria-hidden="true" tabindex="-1"></a><span class="co">// Formatta tempo rimanente</span></span>
+<span id="cb5-18"><a href="#cb5-18" aria-hidden="true" tabindex="-1"></a>String formatTimeRemaining<span class="op">(</span><span class="dt">unsigned</span> <span class="dt">long</span> seconds<span class="op">)</span> <span class="op">{</span></span>
+<span id="cb5-19"><a href="#cb5-19" aria-hidden="true" tabindex="-1"></a>  <span class="dt">unsigned</span> <span class="dt">long</span> hours <span class="op">=</span> seconds <span class="op">/</span> <span class="dv">3600</span><span class="op">;</span></span>
+<span id="cb5-20"><a href="#cb5-20" aria-hidden="true" tabindex="-1"></a>  <span class="dt">unsigned</span> <span class="dt">long</span> minutes <span class="op">=</span> <span class="op">(</span>seconds <span class="op">%</span> <span class="dv">3600</span><span class="op">)</span> <span class="op">/</span> <span class="dv">60</span><span class="op">;</span></span>
+<span id="cb5-21"><a href="#cb5-21" aria-hidden="true" tabindex="-1"></a>  <span class="dt">unsigned</span> <span class="dt">long</span> secs <span class="op">=</span> seconds <span class="op">%</span> <span class="dv">60</span><span class="op">;</span></span>
+<span id="cb5-22"><a href="#cb5-22" aria-hidden="true" tabindex="-1"></a>  </span>
+<span id="cb5-23"><a href="#cb5-23" aria-hidden="true" tabindex="-1"></a>  <span class="cf">if</span> <span class="op">(</span>hours <span class="op">&gt;</span> <span class="dv">0</span><span class="op">)</span> <span class="op">{</span></span>
+<span id="cb5-24"><a href="#cb5-24" aria-hidden="true" tabindex="-1"></a>    <span class="cf">return</span> String<span class="op">(</span>hours<span class="op">)</span> <span class="op">+</span> <span class="st">&quot;h &quot;</span> <span class="op">+</span> String<span class="op">(</span>minutes<span class="op">)</span> <span class="op">+</span> <span class="st">&quot;m&quot;</span><span class="op">;</span></span>
+<span id="cb5-25"><a href="#cb5-25" aria-hidden="true" tabindex="-1"></a>  <span class="op">}</span> <span class="cf">else</span> <span class="cf">if</span> <span class="op">(</span>minutes <span class="op">&gt;</span> <span class="dv">0</span><span class="op">)</span> <span class="op">{</span></span>
+<span id="cb5-26"><a href="#cb5-26" aria-hidden="true" tabindex="-1"></a>    <span class="cf">return</span> String<span class="op">(</span>minutes<span class="op">)</span> <span class="op">+</span> <span class="st">&quot;m &quot;</span> <span class="op">+</span> String<span class="op">(</span>secs<span class="op">)</span> <span class="op">+</span> <span class="st">&quot;s&quot;</span><span class="op">;</span></span>
+<span id="cb5-27"><a href="#cb5-27" aria-hidden="true" tabindex="-1"></a>  <span class="op">}</span> <span class="cf">else</span> <span class="op">{</span></span>
+<span id="cb5-28"><a href="#cb5-28" aria-hidden="true" tabindex="-1"></a>    <span class="cf">return</span> String<span class="op">(</span>secs<span class="op">)</span> <span class="op">+</span> <span class="st">&quot;s&quot;</span><span class="op">;</span></span>
+<span id="cb5-29"><a href="#cb5-29" aria-hidden="true" tabindex="-1"></a>  <span class="op">}</span></span>
+<span id="cb5-30"><a href="#cb5-30" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<hr />
+<h3 id="alert-memoria-nel-loop">3. Alert Memoria nel Loop</h3>
+<div class="sourceCode" id="cb6"><pre
+class="sourceCode cpp"><code class="sourceCode cpp"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a><span class="dt">void</span> checkStorageAlerts<span class="op">()</span> <span class="op">{</span></span>
+<span id="cb6-2"><a href="#cb6-2" aria-hidden="true" tabindex="-1"></a>  <span class="at">static</span> <span class="dt">unsigned</span> <span class="dt">long</span> lastCheck <span class="op">=</span> <span class="dv">0</span><span class="op">;</span></span>
+<span id="cb6-3"><a href="#cb6-3" aria-hidden="true" tabindex="-1"></a>  <span class="cf">if</span> <span class="op">(</span>millis<span class="op">()</span> <span class="op">-</span> lastCheck <span class="op">&lt;</span> <span class="dv">10000</span><span class="op">)</span> <span class="cf">return</span><span class="op">;</span> <span class="co">// Controlla ogni 10 secondi</span></span>
+<span id="cb6-4"><a href="#cb6-4" aria-hidden="true" tabindex="-1"></a>  lastCheck <span class="op">=</span> millis<span class="op">();</span></span>
+<span id="cb6-5"><a href="#cb6-5" aria-hidden="true" tabindex="-1"></a>  </span>
+<span id="cb6-6"><a href="#cb6-6" aria-hidden="true" tabindex="-1"></a>  <span class="dt">float</span> usage <span class="op">=</span> getStorageUsagePercent<span class="op">();</span></span>
+<span id="cb6-7"><a href="#cb6-7" aria-hidden="true" tabindex="-1"></a>  </span>
+<span id="cb6-8"><a href="#cb6-8" aria-hidden="true" tabindex="-1"></a>  <span class="co">// Alert 90%</span></span>
+<span id="cb6-9"><a href="#cb6-9" aria-hidden="true" tabindex="-1"></a>  <span class="cf">if</span> <span class="op">(</span>usage <span class="op">&gt;=</span> STORAGE_WARNING_PERCENT <span class="op">&amp;&amp;</span> <span class="op">!</span>warningShown<span class="op">)</span> <span class="op">{</span></span>
+<span id="cb6-10"><a href="#cb6-10" aria-hidden="true" tabindex="-1"></a>    Serial<span class="op">.</span>println<span class="op">(</span><span class="st">&quot;</span><span class="sc">\n</span><span class="st">⚠️ ================================&quot;</span><span class="op">);</span></span>
+<span id="cb6-11"><a href="#cb6-11" aria-hidden="true" tabindex="-1"></a>    Serial<span class="op">.</span>println<span class="op">(</span><span class="st">&quot;⚠️  ATTENZIONE: Memoria Flash &gt;90%&quot;</span><span class="op">);</span></span>
+<span id="cb6-12"><a href="#cb6-12" aria-hidden="true" tabindex="-1"></a>    Serial<span class="op">.</span>printf<span class="op">(</span><span class="st">&quot;⚠️  Uso: </span><span class="sc">%.1f%%</span><span class="st"> (</span><span class="sc">%d</span><span class="st">/</span><span class="sc">%d</span><span class="st"> campioni)</span><span class="sc">\n</span><span class="st">&quot;</span><span class="op">,</span> </span>
+<span id="cb6-13"><a href="#cb6-13" aria-hidden="true" tabindex="-1"></a>                  usage<span class="op">,</span> longTermStorage<span class="op">.</span>total_points<span class="op">,</span> LONG_TERM_MAX_POINTS<span class="op">);</span></span>
+<span id="cb6-14"><a href="#cb6-14" aria-hidden="true" tabindex="-1"></a>    Serial<span class="op">.</span>println<span class="op">(</span><span class="st">&quot;⚠️  SCARICA DATI PRIMA DI PERDERE VECCHI!&quot;</span><span class="op">);</span></span>
+<span id="cb6-15"><a href="#cb6-15" aria-hidden="true" tabindex="-1"></a>    Serial<span class="op">.</span>println<span class="op">(</span><span class="st">&quot;⚠️  http://192.168.4.1/csv&quot;</span><span class="op">);</span></span>
+<span id="cb6-16"><a href="#cb6-16" aria-hidden="true" tabindex="-1"></a>    </span>
+<span id="cb6-17"><a href="#cb6-17" aria-hidden="true" tabindex="-1"></a>    <span class="dt">unsigned</span> <span class="dt">long</span> remaining <span class="op">=</span> getStorageTimeRemaining<span class="op">();</span></span>
+<span id="cb6-18"><a href="#cb6-18" aria-hidden="true" tabindex="-1"></a>    Serial<span class="op">.</span>printf<span class="op">(</span><span class="st">&quot;⚠️  Tempo rimasto: </span><span class="sc">%s\n</span><span class="st">&quot;</span><span class="op">,</span> formatTimeRemaining<span class="op">(</span>remaining<span class="op">).</span>c_str<span class="op">());</span></span>
+<span id="cb6-19"><a href="#cb6-19" aria-hidden="true" tabindex="-1"></a>    Serial<span class="op">.</span>println<span class="op">(</span><span class="st">&quot;⚠️ ================================</span><span class="sc">\n</span><span class="st">&quot;</span><span class="op">);</span></span>
+<span id="cb6-20"><a href="#cb6-20" aria-hidden="true" tabindex="-1"></a>    warningShown <span class="op">=</span> <span class="kw">true</span><span class="op">;</span></span>
+<span id="cb6-21"><a href="#cb6-21" aria-hidden="true" tabindex="-1"></a>  <span class="op">}</span></span>
+<span id="cb6-22"><a href="#cb6-22" aria-hidden="true" tabindex="-1"></a>  </span>
+<span id="cb6-23"><a href="#cb6-23" aria-hidden="true" tabindex="-1"></a>  <span class="co">// Alert 100% (Full)</span></span>
+<span id="cb6-24"><a href="#cb6-24" aria-hidden="true" tabindex="-1"></a>  <span class="cf">if</span> <span class="op">(</span>usage <span class="op">&gt;=</span> STORAGE_FULL_PERCENT <span class="op">&amp;&amp;</span> <span class="op">!</span>fullWarningShown<span class="op">)</span> <span class="op">{</span></span>
+<span id="cb6-25"><a href="#cb6-25" aria-hidden="true" tabindex="-1"></a>    Serial<span class="op">.</span>println<span class="op">(</span><span class="st">&quot;</span><span class="sc">\n</span><span class="st">🔴 ================================&quot;</span><span class="op">);</span></span>
+<span id="cb6-26"><a href="#cb6-26" aria-hidden="true" tabindex="-1"></a>    Serial<span class="op">.</span>println<span class="op">(</span><span class="st">&quot;🔴  MEMORIA PIENA!&quot;</span><span class="op">);</span></span>
+<span id="cb6-27"><a href="#cb6-27" aria-hidden="true" tabindex="-1"></a>    Serial<span class="op">.</span>println<span class="op">(</span><span class="st">&quot;🔴  Sovrascrivendo dati più vecchi...&quot;</span><span class="op">);</span></span>
+<span id="cb6-28"><a href="#cb6-28" aria-hidden="true" tabindex="-1"></a>    Serial<span class="op">.</span>println<span class="op">(</span><span class="st">&quot;🔴  SCARICA SUBITO: http://192.168.4.1/csv&quot;</span><span class="op">);</span></span>
+<span id="cb6-29"><a href="#cb6-29" aria-hidden="true" tabindex="-1"></a>    Serial<span class="op">.</span>println<span class="op">(</span><span class="st">&quot;🔴 ================================</span><span class="sc">\n</span><span class="st">&quot;</span><span class="op">);</span></span>
+<span id="cb6-30"><a href="#cb6-30" aria-hidden="true" tabindex="-1"></a>    fullWarningShown <span class="op">=</span> <span class="kw">true</span><span class="op">;</span></span>
+<span id="cb6-31"><a href="#cb6-31" aria-hidden="true" tabindex="-1"></a>  <span class="op">}</span></span>
+<span id="cb6-32"><a href="#cb6-32" aria-hidden="true" tabindex="-1"></a>  </span>
+<span id="cb6-33"><a href="#cb6-33" aria-hidden="true" tabindex="-1"></a>  <span class="co">// Reset warning se scaricato</span></span>
+<span id="cb6-34"><a href="#cb6-34" aria-hidden="true" tabindex="-1"></a>  <span class="cf">if</span> <span class="op">(</span>usage <span class="op">&lt;</span> <span class="fl">80.0</span><span class="op">)</span> <span class="op">{</span></span>
+<span id="cb6-35"><a href="#cb6-35" aria-hidden="true" tabindex="-1"></a>    warningShown <span class="op">=</span> <span class="kw">false</span><span class="op">;</span></span>
+<span id="cb6-36"><a href="#cb6-36" aria-hidden="true" tabindex="-1"></a>    fullWarningShown <span class="op">=</span> <span class="kw">false</span><span class="op">;</span></span>
+<span id="cb6-37"><a href="#cb6-37" aria-hidden="true" tabindex="-1"></a>  <span class="op">}</span></span>
+<span id="cb6-38"><a href="#cb6-38" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span>
+<span id="cb6-39"><a href="#cb6-39" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-40"><a href="#cb6-40" aria-hidden="true" tabindex="-1"></a><span class="co">// Nel loop principale, aggiungi:</span></span>
+<span id="cb6-41"><a href="#cb6-41" aria-hidden="true" tabindex="-1"></a><span class="dt">void</span> loop<span class="op">()</span> <span class="op">{</span></span>
+<span id="cb6-42"><a href="#cb6-42" aria-hidden="true" tabindex="-1"></a>  <span class="co">// ... codice esistente ...</span></span>
+<span id="cb6-43"><a href="#cb6-43" aria-hidden="true" tabindex="-1"></a>  </span>
+<span id="cb6-44"><a href="#cb6-44" aria-hidden="true" tabindex="-1"></a>  checkStorageAlerts<span class="op">();</span>  <span class="co">// ✨ NUOVO</span></span>
+<span id="cb6-45"><a href="#cb6-45" aria-hidden="true" tabindex="-1"></a>  </span>
+<span id="cb6-46"><a href="#cb6-46" aria-hidden="true" tabindex="-1"></a>  <span class="co">// ... resto codice ...</span></span>
+<span id="cb6-47"><a href="#cb6-47" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<hr />
+<h3 id="info-storage-nellapi">4. Info Storage nell’API</h3>
+<div class="sourceCode" id="cb7"><pre
+class="sourceCode cpp"><code class="sourceCode cpp"><span id="cb7-1"><a href="#cb7-1" aria-hidden="true" tabindex="-1"></a><span class="dt">void</span> getLongTermStorageInfo<span class="op">(</span>JsonObject<span class="op">&amp;</span> info<span class="op">)</span> <span class="op">{</span></span>
+<span id="cb7-2"><a href="#cb7-2" aria-hidden="true" tabindex="-1"></a>  info<span class="op">[</span><span class="st">&quot;initialized&quot;</span><span class="op">]</span> <span class="op">=</span> longTermStorage<span class="op">.</span>initialized<span class="op">;</span></span>
+<span id="cb7-3"><a href="#cb7-3" aria-hidden="true" tabindex="-1"></a>  info<span class="op">[</span><span class="st">&quot;total_points&quot;</span><span class="op">]</span> <span class="op">=</span> longTermStorage<span class="op">.</span>total_points<span class="op">;</span></span>
+<span id="cb7-4"><a href="#cb7-4" aria-hidden="true" tabindex="-1"></a>  info<span class="op">[</span><span class="st">&quot;max_points&quot;</span><span class="op">]</span> <span class="op">=</span> LONG_TERM_MAX_POINTS<span class="op">;</span></span>
+<span id="cb7-5"><a href="#cb7-5" aria-hidden="true" tabindex="-1"></a>  info<span class="op">[</span><span class="st">&quot;write_index&quot;</span><span class="op">]</span> <span class="op">=</span> longTermStorage<span class="op">.</span>write_index<span class="op">;</span></span>
+<span id="cb7-6"><a href="#cb7-6" aria-hidden="true" tabindex="-1"></a>  </span>
+<span id="cb7-7"><a href="#cb7-7" aria-hidden="true" tabindex="-1"></a>  <span class="co">// ✨ NUOVO: Info dettagliate</span></span>
+<span id="cb7-8"><a href="#cb7-8" aria-hidden="true" tabindex="-1"></a>  info<span class="op">[</span><span class="st">&quot;usage_percent&quot;</span><span class="op">]</span> <span class="op">=</span> getStorageUsagePercent<span class="op">();</span></span>
+<span id="cb7-9"><a href="#cb7-9" aria-hidden="true" tabindex="-1"></a>  info<span class="op">[</span><span class="st">&quot;is_full&quot;</span><span class="op">]</span> <span class="op">=</span> isStorageFull<span class="op">();</span></span>
+<span id="cb7-10"><a href="#cb7-10" aria-hidden="true" tabindex="-1"></a>  info<span class="op">[</span><span class="st">&quot;sample_rate_hz&quot;</span><span class="op">]</span> <span class="op">=</span> <span class="fl">1000.0</span> <span class="op">/</span> LONG_TERM_SAVE_INTERVAL<span class="op">;</span></span>
+<span id="cb7-11"><a href="#cb7-11" aria-hidden="true" tabindex="-1"></a>  </span>
+<span id="cb7-12"><a href="#cb7-12" aria-hidden="true" tabindex="-1"></a>  <span class="cf">if</span> <span class="op">(</span>longTermStorage<span class="op">.</span>initialized <span class="op">&amp;&amp;</span> longTermStorage<span class="op">.</span>total_points <span class="op">&gt;</span> <span class="dv">0</span><span class="op">)</span> <span class="op">{</span></span>
+<span id="cb7-13"><a href="#cb7-13" aria-hidden="true" tabindex="-1"></a>    <span class="dt">float</span> hours <span class="op">=</span> <span class="op">(</span>longTermStorage<span class="op">.</span>total_points <span class="op">*</span> LONG_TERM_SAVE_INTERVAL<span class="op">)</span> <span class="op">/</span> <span class="op">(</span><span class="fl">1000.0</span> <span class="op">*</span> <span class="fl">3600.0</span><span class="op">);</span></span>
+<span id="cb7-14"><a href="#cb7-14" aria-hidden="true" tabindex="-1"></a>    info<span class="op">[</span><span class="st">&quot;coverage_hours&quot;</span><span class="op">]</span> <span class="op">=</span> hours<span class="op">;</span></span>
+<span id="cb7-15"><a href="#cb7-15" aria-hidden="true" tabindex="-1"></a>    </span>
+<span id="cb7-16"><a href="#cb7-16" aria-hidden="true" tabindex="-1"></a>    <span class="cf">if</span> <span class="op">(!</span>isStorageFull<span class="op">())</span> <span class="op">{</span></span>
+<span id="cb7-17"><a href="#cb7-17" aria-hidden="true" tabindex="-1"></a>      <span class="dt">unsigned</span> <span class="dt">long</span> remaining <span class="op">=</span> getStorageTimeRemaining<span class="op">();</span></span>
+<span id="cb7-18"><a href="#cb7-18" aria-hidden="true" tabindex="-1"></a>      info<span class="op">[</span><span class="st">&quot;time_remaining_sec&quot;</span><span class="op">]</span> <span class="op">=</span> remaining<span class="op">;</span></span>
+<span id="cb7-19"><a href="#cb7-19" aria-hidden="true" tabindex="-1"></a>      info<span class="op">[</span><span class="st">&quot;time_remaining_formatted&quot;</span><span class="op">]</span> <span class="op">=</span> formatTimeRemaining<span class="op">(</span>remaining<span class="op">);</span></span>
+<span id="cb7-20"><a href="#cb7-20" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span> <span class="cf">else</span> <span class="op">{</span></span>
+<span id="cb7-21"><a href="#cb7-21" aria-hidden="true" tabindex="-1"></a>      info<span class="op">[</span><span class="st">&quot;warning&quot;</span><span class="op">]</span> <span class="op">=</span> <span class="st">&quot;FULL - Oldest data being overwritten&quot;</span><span class="op">;</span></span>
+<span id="cb7-22"><a href="#cb7-22" aria-hidden="true" tabindex="-1"></a>    <span class="op">}</span></span>
+<span id="cb7-23"><a href="#cb7-23" aria-hidden="true" tabindex="-1"></a>  <span class="op">}</span></span>
+<span id="cb7-24"><a href="#cb7-24" aria-hidden="true" tabindex="-1"></a>  </span>
+<span id="cb7-25"><a href="#cb7-25" aria-hidden="true" tabindex="-1"></a>  <span class="co">// Info filesystem</span></span>
+<span id="cb7-26"><a href="#cb7-26" aria-hidden="true" tabindex="-1"></a>  info<span class="op">[</span><span class="st">&quot;spiffs_total_kb&quot;</span><span class="op">]</span> <span class="op">=</span> SPIFFS<span class="op">.</span>totalBytes<span class="op">()</span> <span class="op">/</span> <span class="dv">1024</span><span class="op">;</span></span>
+<span id="cb7-27"><a href="#cb7-27" aria-hidden="true" tabindex="-1"></a>  info<span class="op">[</span><span class="st">&quot;spiffs_used_kb&quot;</span><span class="op">]</span> <span class="op">=</span> SPIFFS<span class="op">.</span>usedBytes<span class="op">()</span> <span class="op">/</span> <span class="dv">1024</span><span class="op">;</span></span>
+<span id="cb7-28"><a href="#cb7-28" aria-hidden="true" tabindex="-1"></a>  info<span class="op">[</span><span class="st">&quot;spiffs_free_kb&quot;</span><span class="op">]</span> <span class="op">=</span> <span class="op">(</span>SPIFFS<span class="op">.</span>totalBytes<span class="op">()</span> <span class="op">-</span> SPIFFS<span class="op">.</span>usedBytes<span class="op">())</span> <span class="op">/</span> <span class="dv">1024</span><span class="op">;</span></span>
+<span id="cb7-29"><a href="#cb7-29" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<hr />
+<h3 id="pagina-web---indicatore-avanzato">5. Pagina Web - Indicatore
+Avanzato</h3>
+<div class="sourceCode" id="cb8"><pre
+class="sourceCode javascript"><code class="sourceCode javascript"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true" tabindex="-1"></a><span class="kw">function</span> <span class="fu">updateStorageInfo</span>(storageInfo) {</span>
+<span id="cb8-2"><a href="#cb8-2" aria-hidden="true" tabindex="-1"></a>  <span class="cf">if</span> (<span class="op">!</span>storageInfo <span class="op">||</span> <span class="op">!</span>storageInfo<span class="op">.</span><span class="at">initialized</span>) <span class="cf">return</span><span class="op">;</span></span>
+<span id="cb8-3"><a href="#cb8-3" aria-hidden="true" tabindex="-1"></a>  </span>
+<span id="cb8-4"><a href="#cb8-4" aria-hidden="true" tabindex="-1"></a>  <span class="kw">let</span> usage <span class="op">=</span> storageInfo<span class="op">.</span><span class="at">usage_percent</span> <span class="op">||</span> <span class="dv">0</span><span class="op">;</span></span>
+<span id="cb8-5"><a href="#cb8-5" aria-hidden="true" tabindex="-1"></a>  <span class="kw">let</span> info <span class="op">=</span> <span class="st">&#39;💾 Flash: &#39;</span> <span class="op">+</span> storageInfo<span class="op">.</span><span class="at">total_points</span> <span class="op">+</span> <span class="st">&#39;/&#39;</span> <span class="op">+</span> storageInfo<span class="op">.</span><span class="at">max_points</span> <span class="op">+</span> <span class="st">&#39; campioni&#39;</span><span class="op">;</span></span>
+<span id="cb8-6"><a href="#cb8-6" aria-hidden="true" tabindex="-1"></a>  </span>
+<span id="cb8-7"><a href="#cb8-7" aria-hidden="true" tabindex="-1"></a>  <span class="cf">if</span> (storageInfo<span class="op">.</span><span class="at">coverage_hours</span>) {</span>
+<span id="cb8-8"><a href="#cb8-8" aria-hidden="true" tabindex="-1"></a>    info <span class="op">+=</span> <span class="st">&#39; (&#39;</span> <span class="op">+</span> storageInfo<span class="op">.</span><span class="at">coverage_hours</span><span class="op">.</span><span class="fu">toFixed</span>(<span class="dv">1</span>) <span class="op">+</span> <span class="st">&#39;h)&#39;</span><span class="op">;</span></span>
+<span id="cb8-9"><a href="#cb8-9" aria-hidden="true" tabindex="-1"></a>  }</span>
+<span id="cb8-10"><a href="#cb8-10" aria-hidden="true" tabindex="-1"></a>  </span>
+<span id="cb8-11"><a href="#cb8-11" aria-hidden="true" tabindex="-1"></a>  <span class="co">// Tempo rimanente</span></span>
+<span id="cb8-12"><a href="#cb8-12" aria-hidden="true" tabindex="-1"></a>  <span class="cf">if</span> (storageInfo<span class="op">.</span><span class="at">time_remaining_formatted</span> <span class="op">&amp;&amp;</span> <span class="op">!</span>storageInfo<span class="op">.</span><span class="at">is_full</span>) {</span>
+<span id="cb8-13"><a href="#cb8-13" aria-hidden="true" tabindex="-1"></a>    info <span class="op">+=</span> <span class="st">&#39; | ⏱️ &#39;</span> <span class="op">+</span> storageInfo<span class="op">.</span><span class="at">time_remaining_formatted</span> <span class="op">+</span> <span class="st">&#39; rimasti&#39;</span><span class="op">;</span></span>
+<span id="cb8-14"><a href="#cb8-14" aria-hidden="true" tabindex="-1"></a>  }</span>
+<span id="cb8-15"><a href="#cb8-15" aria-hidden="true" tabindex="-1"></a>  </span>
+<span id="cb8-16"><a href="#cb8-16" aria-hidden="true" tabindex="-1"></a>  <span class="co">// Uso memoria</span></span>
+<span id="cb8-17"><a href="#cb8-17" aria-hidden="true" tabindex="-1"></a>  info <span class="op">+=</span> <span class="st">&#39; | &#39;</span> <span class="op">+</span> storageInfo<span class="op">.</span><span class="at">spiffs_used_kb</span> <span class="op">+</span> <span class="st">&#39;/&#39;</span> <span class="op">+</span> storageInfo<span class="op">.</span><span class="at">spiffs_total_kb</span> <span class="op">+</span> <span class="st">&#39;KB&#39;</span><span class="op">;</span></span>
+<span id="cb8-18"><a href="#cb8-18" aria-hidden="true" tabindex="-1"></a>  </span>
+<span id="cb8-19"><a href="#cb8-19" aria-hidden="true" tabindex="-1"></a>  <span class="co">// Freccia di stato</span></span>
+<span id="cb8-20"><a href="#cb8-20" aria-hidden="true" tabindex="-1"></a>  <span class="cf">if</span> (usage <span class="op">&lt;</span> <span class="dv">50</span>) {</span>
+<span id="cb8-21"><a href="#cb8-21" aria-hidden="true" tabindex="-1"></a>    info <span class="op">+=</span> <span class="st">&#39; ✅&#39;</span><span class="op">;</span></span>
+<span id="cb8-22"><a href="#cb8-22" aria-hidden="true" tabindex="-1"></a>  } <span class="cf">else</span> <span class="cf">if</span> (usage <span class="op">&lt;</span> <span class="dv">90</span>) {</span>
+<span id="cb8-23"><a href="#cb8-23" aria-hidden="true" tabindex="-1"></a>    info <span class="op">+=</span> <span class="st">&#39; ⚠️&#39;</span><span class="op">;</span></span>
+<span id="cb8-24"><a href="#cb8-24" aria-hidden="true" tabindex="-1"></a>  } <span class="cf">else</span> {</span>
+<span id="cb8-25"><a href="#cb8-25" aria-hidden="true" tabindex="-1"></a>    info <span class="op">+=</span> <span class="st">&#39; 🔴&#39;</span><span class="op">;</span></span>
+<span id="cb8-26"><a href="#cb8-26" aria-hidden="true" tabindex="-1"></a>  }</span>
+<span id="cb8-27"><a href="#cb8-27" aria-hidden="true" tabindex="-1"></a>  </span>
+<span id="cb8-28"><a href="#cb8-28" aria-hidden="true" tabindex="-1"></a>  <span class="kw">let</span> elem <span class="op">=</span> <span class="bu">document</span><span class="op">.</span><span class="fu">getElementById</span>(<span class="st">&#39;storageInfo&#39;</span>)<span class="op">;</span></span>
+<span id="cb8-29"><a href="#cb8-29" aria-hidden="true" tabindex="-1"></a>  elem<span class="op">.</span><span class="at">textContent</span> <span class="op">=</span> info<span class="op">;</span></span>
+<span id="cb8-30"><a href="#cb8-30" aria-hidden="true" tabindex="-1"></a>  </span>
+<span id="cb8-31"><a href="#cb8-31" aria-hidden="true" tabindex="-1"></a>  <span class="co">// Cambio colore in base a usage</span></span>
+<span id="cb8-32"><a href="#cb8-32" aria-hidden="true" tabindex="-1"></a>  <span class="cf">if</span> (usage <span class="op">&gt;=</span> <span class="dv">90</span>) {</span>
+<span id="cb8-33"><a href="#cb8-33" aria-hidden="true" tabindex="-1"></a>    elem<span class="op">.</span><span class="at">style</span><span class="op">.</span><span class="at">color</span> <span class="op">=</span> <span class="st">&#39;#ef4444&#39;</span><span class="op">;</span> <span class="co">// Rosso</span></span>
+<span id="cb8-34"><a href="#cb8-34" aria-hidden="true" tabindex="-1"></a>    elem<span class="op">.</span><span class="at">style</span><span class="op">.</span><span class="at">fontWeight</span> <span class="op">=</span> <span class="st">&#39;bold&#39;</span><span class="op">;</span></span>
+<span id="cb8-35"><a href="#cb8-35" aria-hidden="true" tabindex="-1"></a>  } <span class="cf">else</span> <span class="cf">if</span> (usage <span class="op">&gt;=</span> <span class="dv">75</span>) {</span>
+<span id="cb8-36"><a href="#cb8-36" aria-hidden="true" tabindex="-1"></a>    elem<span class="op">.</span><span class="at">style</span><span class="op">.</span><span class="at">color</span> <span class="op">=</span> <span class="st">&#39;#f59e0b&#39;</span><span class="op">;</span> <span class="co">// Arancione</span></span>
+<span id="cb8-37"><a href="#cb8-37" aria-hidden="true" tabindex="-1"></a>  } <span class="cf">else</span> {</span>
+<span id="cb8-38"><a href="#cb8-38" aria-hidden="true" tabindex="-1"></a>    elem<span class="op">.</span><span class="at">style</span><span class="op">.</span><span class="at">color</span> <span class="op">=</span> <span class="st">&#39;#94a3b8&#39;</span><span class="op">;</span> <span class="co">// Grigio normale</span></span>
+<span id="cb8-39"><a href="#cb8-39" aria-hidden="true" tabindex="-1"></a>  }</span>
+<span id="cb8-40"><a href="#cb8-40" aria-hidden="true" tabindex="-1"></a>  </span>
+<span id="cb8-41"><a href="#cb8-41" aria-hidden="true" tabindex="-1"></a>  <span class="co">// Mostra alert se pieno</span></span>
+<span id="cb8-42"><a href="#cb8-42" aria-hidden="true" tabindex="-1"></a>  <span class="cf">if</span> (storageInfo<span class="op">.</span><span class="at">is_full</span> <span class="op">&amp;&amp;</span> <span class="op">!</span><span class="bu">window</span><span class="op">.</span><span class="at">fullAlertShown</span>) {</span>
+<span id="cb8-43"><a href="#cb8-43" aria-hidden="true" tabindex="-1"></a>    <span class="fu">alert</span>(<span class="st">&#39;🔴 MEMORIA PIENA!</span><span class="sc">\n\n</span><span class="st">I dati più vecchi stanno per essere sovrascritti.</span><span class="sc">\n\n</span><span class="st">Scarica CSV ora: http://192.168.4.1/csv&#39;</span>)<span class="op">;</span></span>
+<span id="cb8-44"><a href="#cb8-44" aria-hidden="true" tabindex="-1"></a>    <span class="bu">window</span><span class="op">.</span><span class="at">fullAlertShown</span> <span class="op">=</span> <span class="kw">true</span><span class="op">;</span></span>
+<span id="cb8-45"><a href="#cb8-45" aria-hidden="true" tabindex="-1"></a>  }</span>
+<span id="cb8-46"><a href="#cb8-46" aria-hidden="true" tabindex="-1"></a>}</span></code></pre></div>
+<hr />
+<h3 id="scale-temporali-aggiornate">6. Scale Temporali Aggiornate</h3>
+<div class="sourceCode" id="cb9"><pre
+class="sourceCode javascript"><code class="sourceCode javascript"><span id="cb9-1"><a href="#cb9-1" aria-hidden="true" tabindex="-1"></a><span class="co">// Aggiorna scale nella pagina grafici</span></span>
+<span id="cb9-2"><a href="#cb9-2" aria-hidden="true" tabindex="-1"></a>html <span class="op">+=</span> <span class="st">&quot;&lt;optgroup label=&#39;📊 RAM (Veloce - 1Hz)&#39;&gt;&quot;</span><span class="op">;</span></span>
+<span id="cb9-3"><a href="#cb9-3" aria-hidden="true" tabindex="-1"></a>html <span class="op">+=</span> <span class="st">&quot;&lt;option value=&#39;10s&#39;&gt;10 secondi&lt;/option&gt;&quot;</span><span class="op">;</span></span>
+<span id="cb9-4"><a href="#cb9-4" aria-hidden="true" tabindex="-1"></a>html <span class="op">+=</span> <span class="st">&quot;&lt;option value=&#39;30s&#39;&gt;30 secondi&lt;/option&gt;&quot;</span><span class="op">;</span></span>
+<span id="cb9-5"><a href="#cb9-5" aria-hidden="true" tabindex="-1"></a>html <span class="op">+=</span> <span class="st">&quot;&lt;option value=&#39;1m&#39; selected&gt;1 minuto&lt;/option&gt;&quot;</span><span class="op">;</span></span>
+<span id="cb9-6"><a href="#cb9-6" aria-hidden="true" tabindex="-1"></a>html <span class="op">+=</span> <span class="st">&quot;&lt;option value=&#39;2m&#39;&gt;2 minuti&lt;/option&gt;&quot;</span><span class="op">;</span>  <span class="co">// ✨ NUOVO (max RAM)</span></span>
+<span id="cb9-7"><a href="#cb9-7" aria-hidden="true" tabindex="-1"></a>html <span class="op">+=</span> <span class="st">&quot;&lt;/optgroup&gt;&quot;</span><span class="op">;</span></span>
+<span id="cb9-8"><a href="#cb9-8" aria-hidden="true" tabindex="-1"></a>html <span class="op">+=</span> <span class="st">&quot;&lt;optgroup label=&#39;💾 Flash (Lungo - 1Hz)&#39;&gt;&quot;</span><span class="op">;</span>  <span class="co">// ⚠️ Era 0.1Hz</span></span>
+<span id="cb9-9"><a href="#cb9-9" aria-hidden="true" tabindex="-1"></a>html <span class="op">+=</span> <span class="st">&quot;&lt;option value=&#39;5m&#39;&gt;5 minuti&lt;/option&gt;&quot;</span><span class="op">;</span>      <span class="co">// ✨ NUOVO</span></span>
+<span id="cb9-10"><a href="#cb9-10" aria-hidden="true" tabindex="-1"></a>html <span class="op">+=</span> <span class="st">&quot;&lt;option value=&#39;10m&#39;&gt;10 minuti&lt;/option&gt;&quot;</span><span class="op">;</span></span>
+<span id="cb9-11"><a href="#cb9-11" aria-hidden="true" tabindex="-1"></a>html <span class="op">+=</span> <span class="st">&quot;&lt;option value=&#39;30m&#39;&gt;30 minuti&lt;/option&gt;&quot;</span><span class="op">;</span></span>
+<span id="cb9-12"><a href="#cb9-12" aria-hidden="true" tabindex="-1"></a>html <span class="op">+=</span> <span class="st">&quot;&lt;option value=&#39;1h&#39;&gt;1 ora&lt;/option&gt;&quot;</span><span class="op">;</span></span>
+<span id="cb9-13"><a href="#cb9-13" aria-hidden="true" tabindex="-1"></a>html <span class="op">+=</span> <span class="st">&quot;&lt;option value=&#39;2h&#39;&gt;2 ore&lt;/option&gt;&quot;</span><span class="op">;</span>         <span class="co">// ✨ NUOVO</span></span>
+<span id="cb9-14"><a href="#cb9-14" aria-hidden="true" tabindex="-1"></a>html <span class="op">+=</span> <span class="st">&quot;&lt;option value=&#39;4h&#39;&gt;4 ore&lt;/option&gt;&quot;</span><span class="op">;</span></span>
+<span id="cb9-15"><a href="#cb9-15" aria-hidden="true" tabindex="-1"></a>html <span class="op">+=</span> <span class="st">&quot;&lt;/optgroup&gt;&quot;</span><span class="op">;</span></span></code></pre></div>
+<hr />
+<h2 id="esempio-output-ottimizzato">📊 ESEMPIO OUTPUT OTTIMIZZATO</h2>
+<h3 id="serial-monitor---avvio">Serial Monitor - Avvio</h3>
+<pre><code>🚀 AlixBlimp Battery Monitor &amp; Motor Control v2.1
+========================================
+📦 Storage Ottimizzato: RAM (2min @ 1Hz) + Flash (4h @ 1Hz)
+
+💾 Inizializzazione SPIFFS...
+📊 SPIFFS: 4096 KB totali, 45 KB usati, 4051 KB liberi
+📂 File dati esistente: 835200 bytes, 14400 campioni (FULL)
+✅ Storage lungo termine inizializzato!
+🔄 Modalità Rolling: Dati più vecchi verranno sovrascritti</code></pre>
+<h3 id="durante-registrazione">Durante Registrazione</h3>
+<pre><code>[Dopo 3h 36min]
+💾 Salvati 12960/14400 campioni long-term (90.0% buffer)
+
+⚠️ ================================
+⚠️  ATTENZIONE: Memoria Flash &gt;90%
+⚠️  Uso: 90.0% (12960/14400 campioni)
+⚠️  SCARICA DATI PRIMA DI PERDERE VECCHI!
+⚠️  http://192.168.4.1/csv
+⚠️  Tempo rimasto: 24m 0s
+⚠️ ================================
+
+[Dopo 4h esatte]
+💾 Salvati 14400/14400 campioni long-term (100.0% buffer)
+
+🔴 ================================
+🔴  MEMORIA PIENA!
+🔴  Sovrascrivendo dati più vecchi...
+🔴  SCARICA SUBITO: http://192.168.4.1/csv
+🔴 ================================
+
+[Continua...]
+💾 Campione 14401 → Sovrascrive campione 1 (4h fa)
+💾 Campione 14402 → Sovrascrive campione 2 (4h fa)
+...</code></pre>
+<h3 id="pagina-web">Pagina Web</h3>
+<pre><code>💾 Flash: 14400/14400 campioni (4.0h) | ⏱️ 0s rimasti | 815/4096KB 🔴</code></pre>
+<hr />
+<h2 id="vantaggi-soluzione">🎯 VANTAGGI SOLUZIONE</h2>
+<h3 id="performance">Performance</h3>
+<ul>
+<li>✅ <strong>10x più veloce</strong> Flash (1Hz vs 0.1Hz)</li>
+<li>✅ <strong>Cattura transitori</strong> corrente (500ms
+risoluzione)</li>
+<li>✅ <strong>RAM ridotta</strong> da 9.6KB a 3.75KB (-60%)</li>
+<li>✅ <strong>Visualizzazione focalizzata</strong> (ultimo minuto non
+5)</li>
+</ul>
+<h3 id="gestione-dati">Gestione Dati</h3>
+<ul>
+<li>✅ <strong>Rolling automatico</strong> (circolare)</li>
+<li>✅ <strong>Alert proattivi</strong> (90%, 100%)</li>
+<li>✅ <strong>Tempo rimanente</strong> visibile</li>
+<li>✅ <strong>Indicatori colorati</strong> (verde/giallo/rosso)</li>
+</ul>
+<h3 id="analisi">Analisi</h3>
+<ul>
+<li>✅ <strong>4 ore @ 1Hz</strong> = 14,400 campioni</li>
+<li>✅ <strong>Perfetto per transitori</strong> PWM</li>
+<li>✅ <strong>CSV export completo</strong></li>
+<li>✅ <strong>Correlazione PWM-corrente</strong> visibile</li>
+</ul>
+<hr />
+<h2 id="timeline-registrazione">📈 TIMELINE REGISTRAZIONE</h2>
+<pre><code>Tempo    | RAM        | Flash      | Alert
+---------|------------|------------|-------------
+0-2 min  | 0-120 sec  | 0-120 sec  | -
+2-5 min  | Rolling    | 120-300    | -
+5-1h     | Rolling    | 300-3600   | -
+1-3h     | Rolling    | 3.6k-10.8k | -
+3h 36m   | Rolling    | 12,960     | ⚠️ &gt;90%
+4h       | Rolling    | 14,400     | 🔴 FULL
+4h+      | Rolling    | 14,400     | 🔄 Overwrite old</code></pre>
+<hr />
+<h2 id="test-transitori">🧪 TEST TRANSITORI</h2>
+<h3 id="scenario-test">Scenario Test</h3>
+<pre><code>Tempo | PWM Right | Corrente | Note
+------|-----------|----------|------------------
+0.0s  | 1500 μs   | 1.5 A    | Hover stabile
+0.5s  | 1800 μs   | 4.2 A    | Comando accelera
+1.0s  | 1800 μs   | 5.8 A    | Transitorio
+1.5s  | 1800 μs   | 6.5 A    | Stabilizzato
+2.0s  | 1500 μs   | 3.1 A    | Comando stop
+2.5s  | 1500 μs   | 1.8 A    | Transitorio
+3.0s  | 1500 μs   | 1.5 A    | Hover ripristinato</code></pre>
+<h3 id="con-0.1hz-10s---perso">Con 0.1Hz (10s) - ❌ PERSO</h3>
+<pre><code>Campioni: 0s, 10s, 20s
+Risultato: Perde tutto il transitorio 0-3s!</code></pre>
+<h3 id="con-1hz-1s---perfetto">Con 1Hz (1s) - ✅ PERFETTO</h3>
+<pre><code>Campioni: 0s, 1s, 2s, 3s, 4s...
+Risultato: Cattura tutto il transitorio!</code></pre>
+<hr />
+<h2 id="prossimi-step">🚀 PROSSIMI STEP</h2>
+<h3 id="applica-modifiche">1. Applica Modifiche</h3>
+<ul class="task-list">
+<li><label><input type="checkbox" />Cambia
+<code>LONG_TERM_SAVE_INTERVAL</code> da 10000 a 1000</label></li>
+<li><label><input type="checkbox" />Cambia
+<code>LONG_TERM_MAX_POINTS</code> da 1440 a 14400</label></li>
+<li><label><input type="checkbox" />Cambia
+<code>ChartData values[300]</code> a
+<code>values[120]</code></label></li>
+<li><label><input type="checkbox" />Aggiungi funzioni alert
+memoria</label></li>
+</ul>
+<h3 id="testa">2. Testa</h3>
+<ul class="task-list">
+<li><label><input type="checkbox" />Upload firmware</label></li>
+<li><label><input type="checkbox" />Verifica Serial: “4h @
+1Hz”</label></li>
+<li><label><input type="checkbox" />Attendi 10 minuti</label></li>
+<li><label><input type="checkbox" />Verifica risoluzione
+1Hz</label></li>
+<li><label><input type="checkbox" />Testa alert 90%</label></li>
+</ul>
+<h3 id="valida">3. Valida</h3>
+<ul class="task-list">
+<li><label><input type="checkbox" />Export CSV dopo 1 ora</label></li>
+<li><label><input type="checkbox" />Conta campioni (dovrebbero essere
+3600)</label></li>
+<li><label><input type="checkbox" />Verifica cattura transitori
+PWM</label></li>
+<li><label><input type="checkbox" />Controlla uso memoria (&lt;20%
+SPIFFS)</label></li>
+</ul>
+<hr />
+<h2 id="file-da-modificare">📄 FILE DA MODIFICARE</h2>
+<h3 id="principale">Principale</h3>
+<ul>
+<li><strong><code>esp32_battery_monitor.ino</code></strong> - Tutte le
+modifiche sopra</li>
+</ul>
+<h3 id="opzionale">Opzionale</h3>
+<ul>
+<li><strong><code>config.h</code></strong> - Sposta costanti lì per
+facilità</li>
+</ul>
+<hr />
+<h2 id="ottimizzazioni-future">💡 OTTIMIZZAZIONI FUTURE</h2>
+<h3 id="se-serve-ancora-più-risoluzione">Se Serve Ancora Più
+Risoluzione</h3>
+<ol type="1">
+<li><strong>2Hz Flash</strong> (500ms risoluzione)
+<ul>
+<li>28,800 campioni</li>
+<li>1,631 KB (40% SPIFFS)</li>
+<li>Perfetto per transitori veloci</li>
+</ul></li>
+<li><strong>Event-Triggered</strong>
+<ul>
+<li>1Hz normale</li>
+<li>5Hz per 3s dopo cambio PWM &gt;100μs</li>
+<li>Memoria variabile ~1.5Hz medio</li>
+</ul></li>
+<li><strong>Dual Storage</strong>
+<ul>
+<li>1Hz Flash (4h completo)</li>
+<li>10Hz RAM (ultimo minuto)</li>
+<li>Migliore di entrambi i mondi</li>
+</ul></li>
+</ol>
+<hr />
+<p><strong>RACCOMANDAZIONE: Parti con 1Hz e vedi se cattura
+abbastanza!</strong> 🎯</p>
+<p>Ti preparo ora il file .ino aggiornato?</p>
+</body>
+</html>

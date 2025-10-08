@@ -1,0 +1,732 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="" xml:lang="">
+<head>
+  <meta charset="utf-8" />
+  <meta name="generator" content="pandoc" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
+  <title>ESP32 Battery Monitor - Dati Registrati</title>
+  <style>
+    /* Default styles provided by pandoc.
+    ** See https://pandoc.org/MANUAL.html#variables-for-html for config info.
+    */
+    code{white-space: pre-wrap;}
+    span.smallcaps{font-variant: small-caps;}
+    div.columns{display: flex; gap: min(4vw, 1.5em);}
+    div.column{flex: auto; overflow-x: auto;}
+    div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+    /* The extra [class] is a hack that increases specificity enough to
+       override a similar rule in reveal.js */
+    ul.task-list[class]{list-style: none;}
+    ul.task-list li input[type="checkbox"] {
+      font-size: inherit;
+      width: 0.8em;
+      margin: 0 0.8em 0.2em -1.6em;
+      vertical-align: middle;
+    }
+    .display.math{display: block; text-align: center; margin: 0.5rem auto;}
+    /* CSS for syntax highlighting */
+    html { -webkit-text-size-adjust: 100%; }
+    pre > code.sourceCode { white-space: pre; position: relative; }
+    pre > code.sourceCode > span { display: inline-block; line-height: 1.25; }
+    pre > code.sourceCode > span:empty { height: 1.2em; }
+    .sourceCode { overflow: visible; }
+    code.sourceCode > span { color: inherit; text-decoration: inherit; }
+    div.sourceCode { margin: 1em 0; }
+    pre.sourceCode { margin: 0; }
+    @media screen {
+    div.sourceCode { overflow: auto; }
+    }
+    @media print {
+    pre > code.sourceCode { white-space: pre-wrap; }
+    pre > code.sourceCode > span { text-indent: -5em; padding-left: 5em; }
+    }
+    pre.numberSource code
+      { counter-reset: source-line 0; }
+    pre.numberSource code > span
+      { position: relative; left: -4em; counter-increment: source-line; }
+    pre.numberSource code > span > a:first-child::before
+      { content: counter(source-line);
+        position: relative; left: -1em; text-align: right; vertical-align: baseline;
+        border: none; display: inline-block;
+        -webkit-touch-callout: none; -webkit-user-select: none;
+        -khtml-user-select: none; -moz-user-select: none;
+        -ms-user-select: none; user-select: none;
+        padding: 0 4px; width: 4em;
+        color: #aaaaaa;
+      }
+    pre.numberSource { margin-left: 3em; border-left: 1px solid #aaaaaa;  padding-left: 4px; }
+    div.sourceCode
+      {   }
+    @media screen {
+    pre > code.sourceCode > span > a:first-child::before { text-decoration: underline; }
+    }
+    code span.al { color: #ff0000; font-weight: bold; } /* Alert */
+    code span.an { color: #60a0b0; font-weight: bold; font-style: italic; } /* Annotation */
+    code span.at { color: #7d9029; } /* Attribute */
+    code span.bn { color: #40a070; } /* BaseN */
+    code span.bu { color: #008000; } /* BuiltIn */
+    code span.cf { color: #007020; font-weight: bold; } /* ControlFlow */
+    code span.ch { color: #4070a0; } /* Char */
+    code span.cn { color: #880000; } /* Constant */
+    code span.co { color: #60a0b0; font-style: italic; } /* Comment */
+    code span.cv { color: #60a0b0; font-weight: bold; font-style: italic; } /* CommentVar */
+    code span.do { color: #ba2121; font-style: italic; } /* Documentation */
+    code span.dt { color: #902000; } /* DataType */
+    code span.dv { color: #40a070; } /* DecVal */
+    code span.er { color: #ff0000; font-weight: bold; } /* Error */
+    code span.ex { } /* Extension */
+    code span.fl { color: #40a070; } /* Float */
+    code span.fu { color: #06287e; } /* Function */
+    code span.im { color: #008000; font-weight: bold; } /* Import */
+    code span.in { color: #60a0b0; font-weight: bold; font-style: italic; } /* Information */
+    code span.kw { color: #007020; font-weight: bold; } /* Keyword */
+    code span.op { color: #666666; } /* Operator */
+    code span.ot { color: #007020; } /* Other */
+    code span.pp { color: #bc7a00; } /* Preprocessor */
+    code span.sc { color: #4070a0; } /* SpecialChar */
+    code span.ss { color: #bb6688; } /* SpecialString */
+    code span.st { color: #4070a0; } /* String */
+    code span.va { color: #19177c; } /* Variable */
+    code span.vs { color: #4070a0; } /* VerbatimString */
+    code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } /* Warning */
+  </style>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/github-markdown-css@5/github-markdown.min.css" />
+</head>
+<body>
+<header id="title-block-header">
+<h1 class="title">ESP32 Battery Monitor - Dati Registrati</h1>
+</header>
+<h1 id="cosa-registra-il-sistema-di-logging">📊 COSA REGISTRA IL SISTEMA
+DI LOGGING</h1>
+<h2 id="panoramica">🎯 Panoramica</h2>
+<p>Il sistema registra <strong>21 parametri</strong> in totale,
+suddivisi tra <strong>RAM</strong> (alta frequenza) e
+<strong>Flash</strong> (bassa frequenza).</p>
+<hr />
+<h2 id="dati-registrati-nel-dettaglio">📦 DATI REGISTRATI NEL
+DETTAGLIO</h2>
+<h3 id="batterie-3-pacchi">🔋 <strong>Batterie (3 pacchi)</strong></h3>
+<h4 id="per-ogni-batteria-3">Per Ogni Batteria (×3):</h4>
+<ol type="1">
+<li><strong>Tensione Convertita</strong> (V) - Calibrata con
+partitore</li>
+<li><strong>Corrente Convertita</strong> (A) - Calibrata da sensore
+ACS758</li>
+<li><strong>Tensione Raw</strong> (V) - Valore grezzo dal partitore</li>
+<li><strong>Corrente Raw</strong> (V) - Tensione grezza dal sensore
+ACS758</li>
+</ol>
+<p><strong>Totale per batterie</strong>: 4 parametri × 3 batterie =
+<strong>12 parametri</strong></p>
+<h4 id="batterie-specifiche">Batterie Specifiche:</h4>
+<ul>
+<li><strong>Batteria 6S#1</strong> (batteria 0)
+<ul>
+<li><code>v1</code> - Tensione calibrata</li>
+<li><code>c1</code> - Corrente calibrata</li>
+<li><code>rv1</code> - Tensione raw</li>
+<li><code>rc1</code> - Corrente raw</li>
+</ul></li>
+<li><strong>Batteria 6S#2</strong> (batteria 1)
+<ul>
+<li><code>v2</code> - Tensione calibrata</li>
+<li><code>c2</code> - Corrente calibrata</li>
+<li><code>rv2</code> - Tensione raw</li>
+<li><code>rc2</code> - Corrente raw</li>
+</ul></li>
+<li><strong>Batteria 4S</strong> (batteria 2)
+<ul>
+<li><code>v3</code> - Tensione calibrata</li>
+<li><code>c3</code> - Corrente calibrata</li>
+<li><code>rv3</code> - Tensione raw</li>
+<li><code>rc3</code> - Corrente raw</li>
+</ul></li>
+</ul>
+<hr />
+<h3 id="motori-pwm-3-canali">🚁 <strong>Motori PWM (3
+canali)</strong></h3>
+<ol type="1">
+<li><strong>Motor Right</strong> (<code>m1</code>) - PWM motore destro
+(1000-2000 μs)</li>
+<li><strong>Motor Left</strong> (<code>m2</code>) - PWM motore sinistro
+(1000-2000 μs)</li>
+<li><strong>Motor Under</strong> (<code>m3</code>) - PWM motori
+sottostanti (1000-2000 μs)</li>
+</ol>
+<p><strong>Totale motori</strong>: <strong>3 parametri</strong></p>
+<hr />
+<h3 id="timestamp">⏱️ <strong>Timestamp</strong></h3>
+<ol type="1">
+<li><strong>Timestamp</strong> (<code>timestamp</code>) - Millisecondi
+dall’avvio ESP32</li>
+</ol>
+<p><strong>Totale timestamp</strong>: <strong>1 parametro</strong></p>
+<hr />
+<h2 id="riepilogo-totale">📊 RIEPILOGO TOTALE</h2>
+<table>
+<thead>
+<tr>
+<th>Categoria</th>
+<th>Parametri</th>
+<th>Dettaglio</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Batterie (convertite)</strong></td>
+<td>6</td>
+<td>Tensioni + Correnti × 3</td>
+</tr>
+<tr>
+<td><strong>Batterie (raw)</strong></td>
+<td>6</td>
+<td>Tensioni raw + Correnti raw × 3</td>
+</tr>
+<tr>
+<td><strong>Motori PWM</strong></td>
+<td>3</td>
+<td>Right, Left, Under</td>
+</tr>
+<tr>
+<td><strong>Timestamp</strong></td>
+<td>1</td>
+<td>Millisecondi dall’avvio</td>
+</tr>
+<tr>
+<td><strong>TOTALE</strong></td>
+<td><strong>16</strong></td>
+<td><strong>Parametri per campione</strong></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="storage-dual-layer">💾 STORAGE DUAL-LAYER</h2>
+<h3 id="ram-buffer-alta-frequenza">🏃‍♂️ RAM Buffer (Alta Frequenza)</h3>
+<p><strong>Frequenza</strong>: 1 campione/secondo (1 Hz)<br />
+<strong>Durata</strong>: 5 minuti (300 campioni)<br />
+<strong>Chiamata</strong>: <code>updateCharts()</code> nel loop
+principale</p>
+<h4 id="dati-salvati-8-grafici-separati">Dati Salvati (8 grafici
+separati):</h4>
+<ol type="1">
+<li><strong><code>voltage_charts[0]</code></strong> - Tensione Batteria
+6S#1</li>
+<li><strong><code>voltage_charts[1]</code></strong> - Tensione Batteria
+6S#2</li>
+<li><strong><code>voltage_charts[2]</code></strong> - Tensione Batteria
+4S</li>
+<li><strong><code>current_charts[0]</code></strong> - Corrente Batteria
+6S#1</li>
+<li><strong><code>current_charts[1]</code></strong> - Corrente Batteria
+6S#2</li>
+<li><strong><code>current_charts[2]</code></strong> - Corrente Batteria
+4S</li>
+<li><strong><code>raw_voltage_charts[0-2]</code></strong> - Tensioni raw
+× 3</li>
+<li><strong><code>raw_current_charts[0-2]</code></strong> - Correnti raw
+× 3</li>
+<li><strong><code>motor_charts[0]</code></strong> - PWM Motor Right</li>
+<li><strong><code>motor_charts[1]</code></strong> - PWM Motor Left</li>
+<li><strong><code>motor_charts[2]</code></strong> - PWM Motor Under</li>
+</ol>
+<p><strong>Totale</strong>: 8 array da 300 float ciascuno</p>
+<div class="sourceCode" id="cb1"><pre
+class="sourceCode cpp"><code class="sourceCode cpp"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="co">// Codice effettivo (linea 630-650)</span></span>
+<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a><span class="dt">void</span> updateCharts<span class="op">()</span> <span class="op">{</span></span>
+<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a>  <span class="cf">if</span> <span class="op">(</span>millis<span class="op">()</span> <span class="op">-</span> last_chart_update <span class="op">&lt;</span> <span class="dv">1000</span><span class="op">)</span> <span class="cf">return</span><span class="op">;</span> <span class="co">// Ogni 1 secondo</span></span>
+<span id="cb1-4"><a href="#cb1-4" aria-hidden="true" tabindex="-1"></a>  </span>
+<span id="cb1-5"><a href="#cb1-5" aria-hidden="true" tabindex="-1"></a>  <span class="cf">for</span> <span class="op">(</span><span class="dt">int</span> i <span class="op">=</span> <span class="dv">0</span><span class="op">;</span> i <span class="op">&lt;</span> <span class="dv">3</span><span class="op">;</span> i<span class="op">++)</span> <span class="op">{</span></span>
+<span id="cb1-6"><a href="#cb1-6" aria-hidden="true" tabindex="-1"></a>    addToChart<span class="op">(&amp;</span>voltage_charts<span class="op">[</span>i<span class="op">],</span> batteries<span class="op">[</span>i<span class="op">].</span>voltage<span class="op">);</span></span>
+<span id="cb1-7"><a href="#cb1-7" aria-hidden="true" tabindex="-1"></a>    addToChart<span class="op">(&amp;</span>current_charts<span class="op">[</span>i<span class="op">],</span> batteries<span class="op">[</span>i<span class="op">].</span>current<span class="op">);</span></span>
+<span id="cb1-8"><a href="#cb1-8" aria-hidden="true" tabindex="-1"></a>    addToChart<span class="op">(&amp;</span>raw_voltage_charts<span class="op">[</span>i<span class="op">],</span> batteries<span class="op">[</span>i<span class="op">].</span>raw_voltage_voltage<span class="op">);</span></span>
+<span id="cb1-9"><a href="#cb1-9" aria-hidden="true" tabindex="-1"></a>    addToChart<span class="op">(&amp;</span>raw_current_charts<span class="op">[</span>i<span class="op">],</span> batteries<span class="op">[</span>i<span class="op">].</span>raw_current_voltage<span class="op">);</span></span>
+<span id="cb1-10"><a href="#cb1-10" aria-hidden="true" tabindex="-1"></a>  <span class="op">}</span></span>
+<span id="cb1-11"><a href="#cb1-11" aria-hidden="true" tabindex="-1"></a>  </span>
+<span id="cb1-12"><a href="#cb1-12" aria-hidden="true" tabindex="-1"></a>  <span class="co">// PWM motori</span></span>
+<span id="cb1-13"><a href="#cb1-13" aria-hidden="true" tabindex="-1"></a>  addToChart<span class="op">(&amp;</span>motor_charts<span class="op">[</span><span class="dv">0</span><span class="op">],</span> autopilot_input<span class="op">.</span>motor_right<span class="op">);</span></span>
+<span id="cb1-14"><a href="#cb1-14" aria-hidden="true" tabindex="-1"></a>  addToChart<span class="op">(&amp;</span>motor_charts<span class="op">[</span><span class="dv">1</span><span class="op">],</span> autopilot_input<span class="op">.</span>motor_left<span class="op">);</span></span>
+<span id="cb1-15"><a href="#cb1-15" aria-hidden="true" tabindex="-1"></a>  addToChart<span class="op">(&amp;</span>motor_charts<span class="op">[</span><span class="dv">2</span><span class="op">],</span> autopilot_input<span class="op">.</span>motor_under<span class="op">);</span></span>
+<span id="cb1-16"><a href="#cb1-16" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<hr />
+<h3 id="flash-buffer-bassa-frequenza">💾 Flash Buffer (Bassa
+Frequenza)</h3>
+<p><strong>Frequenza</strong>: 1 campione/10 secondi (0.1 Hz)<br />
+<strong>Durata</strong>: 4 ore (1,440 campioni)<br />
+<strong>Chiamata</strong>: <code>saveLongTermDataPoint()</code> nel loop
+principale<br />
+<strong>File</strong>: <code>/data.bin</code> su SPIFFS</p>
+<h4 id="struttura-dati-58-bytes-per-campione">Struttura Dati (58 bytes
+per campione):</h4>
+<div class="sourceCode" id="cb2"><pre
+class="sourceCode cpp"><code class="sourceCode cpp"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="kw">struct</span> LongTermDataPoint <span class="op">{</span></span>
+<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a>  <span class="co">// Timestamp (4 bytes)</span></span>
+<span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a>  <span class="dt">uint32_t</span> timestamp<span class="op">;</span>       <span class="co">// Millisecondi dall&#39;avvio</span></span>
+<span id="cb2-4"><a href="#cb2-4" aria-hidden="true" tabindex="-1"></a>  </span>
+<span id="cb2-5"><a href="#cb2-5" aria-hidden="true" tabindex="-1"></a>  <span class="co">// Tensioni calibrate (12 bytes = 3 × 4 bytes)</span></span>
+<span id="cb2-6"><a href="#cb2-6" aria-hidden="true" tabindex="-1"></a>  <span class="dt">float</span> v1<span class="op">;</span>                 <span class="co">// Batteria 6S#1</span></span>
+<span id="cb2-7"><a href="#cb2-7" aria-hidden="true" tabindex="-1"></a>  <span class="dt">float</span> v2<span class="op">;</span>                 <span class="co">// Batteria 6S#2</span></span>
+<span id="cb2-8"><a href="#cb2-8" aria-hidden="true" tabindex="-1"></a>  <span class="dt">float</span> v3<span class="op">;</span>                 <span class="co">// Batteria 4S</span></span>
+<span id="cb2-9"><a href="#cb2-9" aria-hidden="true" tabindex="-1"></a>  </span>
+<span id="cb2-10"><a href="#cb2-10" aria-hidden="true" tabindex="-1"></a>  <span class="co">// Correnti calibrate (12 bytes = 3 × 4 bytes)</span></span>
+<span id="cb2-11"><a href="#cb2-11" aria-hidden="true" tabindex="-1"></a>  <span class="dt">float</span> c1<span class="op">;</span>                 <span class="co">// Batteria 6S#1</span></span>
+<span id="cb2-12"><a href="#cb2-12" aria-hidden="true" tabindex="-1"></a>  <span class="dt">float</span> c2<span class="op">;</span>                 <span class="co">// Batteria 6S#2</span></span>
+<span id="cb2-13"><a href="#cb2-13" aria-hidden="true" tabindex="-1"></a>  <span class="dt">float</span> c3<span class="op">;</span>                 <span class="co">// Batteria 4S</span></span>
+<span id="cb2-14"><a href="#cb2-14" aria-hidden="true" tabindex="-1"></a>  </span>
+<span id="cb2-15"><a href="#cb2-15" aria-hidden="true" tabindex="-1"></a>  <span class="co">// Tensioni raw (12 bytes = 3 × 4 bytes)</span></span>
+<span id="cb2-16"><a href="#cb2-16" aria-hidden="true" tabindex="-1"></a>  <span class="dt">float</span> rv1<span class="op">;</span>                <span class="co">// Raw voltage Batteria 6S#1</span></span>
+<span id="cb2-17"><a href="#cb2-17" aria-hidden="true" tabindex="-1"></a>  <span class="dt">float</span> rv2<span class="op">;</span>                <span class="co">// Raw voltage Batteria 6S#2</span></span>
+<span id="cb2-18"><a href="#cb2-18" aria-hidden="true" tabindex="-1"></a>  <span class="dt">float</span> rv3<span class="op">;</span>                <span class="co">// Raw voltage Batteria 4S</span></span>
+<span id="cb2-19"><a href="#cb2-19" aria-hidden="true" tabindex="-1"></a>  </span>
+<span id="cb2-20"><a href="#cb2-20" aria-hidden="true" tabindex="-1"></a>  <span class="co">// Correnti raw (12 bytes = 3 × 4 bytes)</span></span>
+<span id="cb2-21"><a href="#cb2-21" aria-hidden="true" tabindex="-1"></a>  <span class="dt">float</span> rc1<span class="op">;</span>                <span class="co">// Raw current voltage Batteria 6S#1</span></span>
+<span id="cb2-22"><a href="#cb2-22" aria-hidden="true" tabindex="-1"></a>  <span class="dt">float</span> rc2<span class="op">;</span>                <span class="co">// Raw current voltage Batteria 6S#2</span></span>
+<span id="cb2-23"><a href="#cb2-23" aria-hidden="true" tabindex="-1"></a>  <span class="dt">float</span> rc3<span class="op">;</span>                <span class="co">// Raw current voltage Batteria 4S</span></span>
+<span id="cb2-24"><a href="#cb2-24" aria-hidden="true" tabindex="-1"></a>  </span>
+<span id="cb2-25"><a href="#cb2-25" aria-hidden="true" tabindex="-1"></a>  <span class="co">// PWM Motori (6 bytes = 3 × 2 bytes)</span></span>
+<span id="cb2-26"><a href="#cb2-26" aria-hidden="true" tabindex="-1"></a>  <span class="dt">uint16_t</span> m1<span class="op">;</span>              <span class="co">// Motor Right</span></span>
+<span id="cb2-27"><a href="#cb2-27" aria-hidden="true" tabindex="-1"></a>  <span class="dt">uint16_t</span> m2<span class="op">;</span>              <span class="co">// Motor Left</span></span>
+<span id="cb2-28"><a href="#cb2-28" aria-hidden="true" tabindex="-1"></a>  <span class="dt">uint16_t</span> m3<span class="op">;</span>              <span class="co">// Motor Under</span></span>
+<span id="cb2-29"><a href="#cb2-29" aria-hidden="true" tabindex="-1"></a>  </span>
+<span id="cb2-30"><a href="#cb2-30" aria-hidden="true" tabindex="-1"></a>  <span class="co">// TOTALE: 58 bytes</span></span>
+<span id="cb2-31"><a href="#cb2-31" aria-hidden="true" tabindex="-1"></a><span class="op">}</span> <span class="ex">__attribute__((packed))</span><span class="op">;</span></span></code></pre></div>
+<h4 id="codice-salvataggio-linea-300-328">Codice Salvataggio (linea
+300-328):</h4>
+<div class="sourceCode" id="cb3"><pre
+class="sourceCode cpp"><code class="sourceCode cpp"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="dt">void</span> saveLongTermDataPoint<span class="op">()</span> <span class="op">{</span></span>
+<span id="cb3-2"><a href="#cb3-2" aria-hidden="true" tabindex="-1"></a>  <span class="cf">if</span> <span class="op">(</span>millis<span class="op">()</span> <span class="op">-</span> last_save <span class="op">&lt;</span> <span class="dv">10000</span><span class="op">)</span> <span class="cf">return</span><span class="op">;</span>  <span class="co">// Ogni 10 secondi</span></span>
+<span id="cb3-3"><a href="#cb3-3" aria-hidden="true" tabindex="-1"></a>  </span>
+<span id="cb3-4"><a href="#cb3-4" aria-hidden="true" tabindex="-1"></a>  LongTermDataPoint dataPoint<span class="op">;</span></span>
+<span id="cb3-5"><a href="#cb3-5" aria-hidden="true" tabindex="-1"></a>  dataPoint<span class="op">.</span>timestamp <span class="op">=</span> millis<span class="op">();</span></span>
+<span id="cb3-6"><a href="#cb3-6" aria-hidden="true" tabindex="-1"></a>  </span>
+<span id="cb3-7"><a href="#cb3-7" aria-hidden="true" tabindex="-1"></a>  <span class="co">// Batterie convertite</span></span>
+<span id="cb3-8"><a href="#cb3-8" aria-hidden="true" tabindex="-1"></a>  dataPoint<span class="op">.</span>v1 <span class="op">=</span> batteries<span class="op">[</span><span class="dv">0</span><span class="op">].</span>voltage<span class="op">;</span></span>
+<span id="cb3-9"><a href="#cb3-9" aria-hidden="true" tabindex="-1"></a>  dataPoint<span class="op">.</span>c1 <span class="op">=</span> batteries<span class="op">[</span><span class="dv">0</span><span class="op">].</span>current<span class="op">;</span></span>
+<span id="cb3-10"><a href="#cb3-10" aria-hidden="true" tabindex="-1"></a>  dataPoint<span class="op">.</span>v2 <span class="op">=</span> batteries<span class="op">[</span><span class="dv">1</span><span class="op">].</span>voltage<span class="op">;</span></span>
+<span id="cb3-11"><a href="#cb3-11" aria-hidden="true" tabindex="-1"></a>  dataPoint<span class="op">.</span>c2 <span class="op">=</span> batteries<span class="op">[</span><span class="dv">1</span><span class="op">].</span>current<span class="op">;</span></span>
+<span id="cb3-12"><a href="#cb3-12" aria-hidden="true" tabindex="-1"></a>  dataPoint<span class="op">.</span>v3 <span class="op">=</span> batteries<span class="op">[</span><span class="dv">2</span><span class="op">].</span>voltage<span class="op">;</span></span>
+<span id="cb3-13"><a href="#cb3-13" aria-hidden="true" tabindex="-1"></a>  dataPoint<span class="op">.</span>c3 <span class="op">=</span> batteries<span class="op">[</span><span class="dv">2</span><span class="op">].</span>current<span class="op">;</span></span>
+<span id="cb3-14"><a href="#cb3-14" aria-hidden="true" tabindex="-1"></a>  </span>
+<span id="cb3-15"><a href="#cb3-15" aria-hidden="true" tabindex="-1"></a>  <span class="co">// Batterie raw</span></span>
+<span id="cb3-16"><a href="#cb3-16" aria-hidden="true" tabindex="-1"></a>  dataPoint<span class="op">.</span>rv1 <span class="op">=</span> batteries<span class="op">[</span><span class="dv">0</span><span class="op">].</span>raw_voltage_voltage<span class="op">;</span></span>
+<span id="cb3-17"><a href="#cb3-17" aria-hidden="true" tabindex="-1"></a>  dataPoint<span class="op">.</span>rc1 <span class="op">=</span> batteries<span class="op">[</span><span class="dv">0</span><span class="op">].</span>raw_current_voltage<span class="op">;</span></span>
+<span id="cb3-18"><a href="#cb3-18" aria-hidden="true" tabindex="-1"></a>  dataPoint<span class="op">.</span>rv2 <span class="op">=</span> batteries<span class="op">[</span><span class="dv">1</span><span class="op">].</span>raw_voltage_voltage<span class="op">;</span></span>
+<span id="cb3-19"><a href="#cb3-19" aria-hidden="true" tabindex="-1"></a>  dataPoint<span class="op">.</span>rc2 <span class="op">=</span> batteries<span class="op">[</span><span class="dv">1</span><span class="op">].</span>raw_current_voltage<span class="op">;</span></span>
+<span id="cb3-20"><a href="#cb3-20" aria-hidden="true" tabindex="-1"></a>  dataPoint<span class="op">.</span>rv3 <span class="op">=</span> batteries<span class="op">[</span><span class="dv">2</span><span class="op">].</span>raw_voltage_voltage<span class="op">;</span></span>
+<span id="cb3-21"><a href="#cb3-21" aria-hidden="true" tabindex="-1"></a>  dataPoint<span class="op">.</span>rc3 <span class="op">=</span> batteries<span class="op">[</span><span class="dv">2</span><span class="op">].</span>raw_current_voltage<span class="op">;</span></span>
+<span id="cb3-22"><a href="#cb3-22" aria-hidden="true" tabindex="-1"></a>  </span>
+<span id="cb3-23"><a href="#cb3-23" aria-hidden="true" tabindex="-1"></a>  <span class="co">// PWM motori</span></span>
+<span id="cb3-24"><a href="#cb3-24" aria-hidden="true" tabindex="-1"></a>  dataPoint<span class="op">.</span>m1 <span class="op">=</span> autopilot_input<span class="op">.</span>motor_right<span class="op">;</span></span>
+<span id="cb3-25"><a href="#cb3-25" aria-hidden="true" tabindex="-1"></a>  dataPoint<span class="op">.</span>m2 <span class="op">=</span> autopilot_input<span class="op">.</span>motor_left<span class="op">;</span></span>
+<span id="cb3-26"><a href="#cb3-26" aria-hidden="true" tabindex="-1"></a>  dataPoint<span class="op">.</span>m3 <span class="op">=</span> autopilot_input<span class="op">.</span>motor_under<span class="op">;</span></span>
+<span id="cb3-27"><a href="#cb3-27" aria-hidden="true" tabindex="-1"></a>  </span>
+<span id="cb3-28"><a href="#cb3-28" aria-hidden="true" tabindex="-1"></a>  <span class="co">// Scrivi su SPIFFS...</span></span>
+<span id="cb3-29"><a href="#cb3-29" aria-hidden="true" tabindex="-1"></a><span class="op">}</span></span></code></pre></div>
+<hr />
+<h2 id="dati-export-csv">📥 DATI EXPORT CSV</h2>
+<h3 id="formato-file-csv">Formato File CSV</h3>
+<pre class="csv"><code>Timestamp_ms,6S1_Voltage,6S1_Current,6S1_RawVoltage,6S1_RawCurrent,
+6S2_Voltage,6S2_Current,6S2_RawVoltage,6S2_RawCurrent,
+4S_Voltage,4S_Current,4S_RawVoltage,4S_RawCurrent,
+MotorRight,MotorLeft,MotorUnder,Source</code></pre>
+<h3 id="esempio-riga-csv">Esempio Riga CSV</h3>
+<pre class="csv"><code>12345000,25.10,2.30,2.987,2.512,24.85,2.25,2.965,2.505,16.50,0.80,2.945,2.498,1500,1500,1500,Flash</code></pre>
+<h3 id="colonne-16-totali">Colonne (16 totali):</h3>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Nome</th>
+<th>Tipo</th>
+<th>Unità</th>
+<th>Descrizione</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>Timestamp_ms</td>
+<td>uint32</td>
+<td>ms</td>
+<td>Millisecondi dall’avvio</td>
+</tr>
+<tr>
+<td>2</td>
+<td>6S1_Voltage</td>
+<td>float</td>
+<td>V</td>
+<td>Tensione calibrata 6S#1</td>
+</tr>
+<tr>
+<td>3</td>
+<td>6S1_Current</td>
+<td>float</td>
+<td>A</td>
+<td>Corrente calibrata 6S#1</td>
+</tr>
+<tr>
+<td>4</td>
+<td>6S1_RawVoltage</td>
+<td>float</td>
+<td>V</td>
+<td>Tensione raw 6S#1</td>
+</tr>
+<tr>
+<td>5</td>
+<td>6S1_RawCurrent</td>
+<td>float</td>
+<td>V</td>
+<td>Tensione sensore ACS758 6S#1</td>
+</tr>
+<tr>
+<td>6</td>
+<td>6S2_Voltage</td>
+<td>float</td>
+<td>V</td>
+<td>Tensione calibrata 6S#2</td>
+</tr>
+<tr>
+<td>7</td>
+<td>6S2_Current</td>
+<td>float</td>
+<td>A</td>
+<td>Corrente calibrata 6S#2</td>
+</tr>
+<tr>
+<td>8</td>
+<td>6S2_RawVoltage</td>
+<td>float</td>
+<td>V</td>
+<td>Tensione raw 6S#2</td>
+</tr>
+<tr>
+<td>9</td>
+<td>6S2_RawCurrent</td>
+<td>float</td>
+<td>V</td>
+<td>Tensione sensore ACS758 6S#2</td>
+</tr>
+<tr>
+<td>10</td>
+<td>4S_Voltage</td>
+<td>float</td>
+<td>V</td>
+<td>Tensione calibrata 4S</td>
+</tr>
+<tr>
+<td>11</td>
+<td>4S_Current</td>
+<td>float</td>
+<td>A</td>
+<td>Corrente calibrata 4S</td>
+</tr>
+<tr>
+<td>12</td>
+<td>4S_RawVoltage</td>
+<td>float</td>
+<td>V</td>
+<td>Tensione raw 4S</td>
+</tr>
+<tr>
+<td>13</td>
+<td>4S_RawCurrent</td>
+<td>float</td>
+<td>V</td>
+<td>Tensione sensore ACS758 4S</td>
+</tr>
+<tr>
+<td>14</td>
+<td>MotorRight</td>
+<td>uint16</td>
+<td>μs</td>
+<td>PWM motore destro</td>
+</tr>
+<tr>
+<td>15</td>
+<td>MotorLeft</td>
+<td>uint16</td>
+<td>μs</td>
+<td>PWM motore sinistro</td>
+</tr>
+<tr>
+<td>16</td>
+<td>MotorUnder</td>
+<td>uint16</td>
+<td>μs</td>
+<td>PWM motori sottostanti</td>
+</tr>
+<tr>
+<td>17</td>
+<td>Source</td>
+<td>string</td>
+<td>-</td>
+<td>“RAM” o “Flash”</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="dettaglio-parametri">🔍 DETTAGLIO PARAMETRI</h2>
+<h3 id="tensioni-calibrate-v">Tensioni Calibrate (V)</h3>
+<p><strong>Range</strong>: 0-30V (tipico 18-26V per 6S, 12-17V per
+4S)<br />
+<strong>Risoluzione</strong>: 0.01V<br />
+<strong>Formula</strong>:
+<code>(ADC_raw × 3.3 / 4095 × divider_ratio + offset) × scale</code></p>
+<p><strong>Esempio</strong>: - 6S completamente carica: ~25.2V - 6S
+nominale: ~22.2V - 6S scarica: ~18.0V</p>
+<hr />
+<h3 id="correnti-calibrate-a">Correnti Calibrate (A)</h3>
+<p><strong>Range</strong>: -50A a +50A (sensore ACS758-50A)<br />
+<strong>Risoluzione</strong>: 0.01A<br />
+<strong>Formula</strong>:
+<code>((ADC_voltage - 2.5V) / 0.04 + offset) × scale</code></p>
+<p><strong>Esempio</strong>: - Corrente motori in volo: 2-10A - Picchi
+accelerazione: 15-30A - Riposo/hover: 1-3A</p>
+<hr />
+<h3 id="tensioni-raw-v">Tensioni Raw (V)</h3>
+<p><strong>Range</strong>: 0-3.3V (input ADC)<br />
+<strong>Risoluzione</strong>: 0.001V<br />
+<strong>Uso</strong>: Verifica partitori, calibrazione, debug</p>
+<p><strong>Esempio</strong>: - Batteria 25.2V → Partitore 8.4:1 → ~3.0V
+ADC</p>
+<hr />
+<h3 id="correnti-raw-v">Correnti Raw (V)</h3>
+<p><strong>Range</strong>: 0-3.3V (output ACS758)<br />
+<strong>Risoluzione</strong>: 0.001V<br />
+<strong>Uso</strong>: Verifica sensori, calibrazione, debug</p>
+<p><strong>Esempio</strong>: - 0A → 2.5V (zero centrale) - +10A → 2.9V
+(2.5 + 10×0.04) - -10A → 2.1V (2.5 - 10×0.04)</p>
+<hr />
+<h3 id="pwm-motori-μs">PWM Motori (μs)</h3>
+<p><strong>Range</strong>: 1000-2000 μs<br />
+<strong>Centro</strong>: 1500 μs (neutro)<br />
+<strong>Risoluzione</strong>: 1 μs</p>
+<p><strong>Mapping</strong>: - 1000 μs → Massimo indietro - 1500 μs →
+Neutro/stop - 2000 μs → Massimo avanti</p>
+<hr />
+<h3 id="timestamp-ms">Timestamp (ms)</h3>
+<p><strong>Range</strong>: 0 a 4,294,967,295 ms (~49 giorni)<br />
+<strong>Risoluzione</strong>: 1 ms<br />
+<strong>Reset</strong>: Ad ogni riavvio ESP32</p>
+<p><strong>Conversione</strong>: - Secondi:
+<code>timestamp / 1000</code> - Minuti: <code>timestamp / 60000</code> -
+Ore: <code>timestamp / 3600000</code></p>
+<hr />
+<h2 id="statistiche-storage">📊 STATISTICHE STORAGE</h2>
+<h3 id="ram-buffer">RAM Buffer</h3>
+<table>
+<thead>
+<tr>
+<th>Parametro</th>
+<th>Valore</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Frequenza</strong></td>
+<td>1 Hz (1 campione/sec)</td>
+</tr>
+<tr>
+<td><strong>Campioni</strong></td>
+<td>300</td>
+</tr>
+<tr>
+<td><strong>Durata</strong></td>
+<td>5 minuti</td>
+</tr>
+<tr>
+<td><strong>Bytes/campione</strong></td>
+<td>4 bytes (float)</td>
+</tr>
+<tr>
+<td><strong>Grafici</strong></td>
+<td>8 array separati</td>
+</tr>
+<tr>
+<td><strong>Memoria totale</strong></td>
+<td>300 × 8 × 4 = 9,600 bytes (~9.6 KB)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="flash-buffer">Flash Buffer</h3>
+<table>
+<thead>
+<tr>
+<th>Parametro</th>
+<th>Valore</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Frequenza</strong></td>
+<td>0.1 Hz (1 campione/10 sec)</td>
+</tr>
+<tr>
+<td><strong>Campioni</strong></td>
+<td>1,440</td>
+</tr>
+<tr>
+<td><strong>Durata</strong></td>
+<td>4 ore</td>
+</tr>
+<tr>
+<td><strong>Bytes/campione</strong></td>
+<td>58 bytes</td>
+</tr>
+<tr>
+<td><strong>Memoria totale</strong></td>
+<td>1,440 × 58 = 83,520 bytes (~82 KB)</td>
+</tr>
+<tr>
+<td><strong>File SPIFFS</strong></td>
+<td><code>/data.bin</code></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="cosa-non-viene-registrato">🎯 COSA NON VIENE REGISTRATO</h2>
+<h3 id="dati-calcolati-ma-non-salvati">Dati Calcolati (ma non
+salvati):</h3>
+<ol type="1">
+<li><strong>Potenza (W)</strong> - Calcolata come <code>V × A</code> ma
+non salvata</li>
+<li><strong>Capacità (Ah)</strong> - Non implementata</li>
+<li><strong>Direzione Motori</strong> - Pin GPIO non letti (sono
+OUTPUT)</li>
+<li><strong>Temperatura</strong> - Sensori non presenti</li>
+<li><strong>GPS</strong> - Non presente</li>
+<li><strong>IMU</strong> - Non presente</li>
+</ol>
+<h3 id="perché-non-salvare-potenza">Perché Non Salvare Potenza?</h3>
+<p>La potenza può essere calcolata <strong>dopo</strong> l’export:</p>
+<div class="sourceCode" id="cb6"><pre
+class="sourceCode python"><code class="sourceCode python"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Python/Excel</span></span>
+<span id="cb6-2"><a href="#cb6-2" aria-hidden="true" tabindex="-1"></a>power <span class="op">=</span> voltage × current</span></code></pre></div>
+<p>Risparmia spazio e può essere ricalcolata quando serve!</p>
+<hr />
+<h2 id="analisi-possibili-con-i-dati">🔬 ANALISI POSSIBILI CON I
+DATI</h2>
+<h3 id="con-tensioni-correnti">Con Tensioni + Correnti:</h3>
+<ol type="1">
+<li>✅ <strong>Consumo energetico</strong> (integrale corrente)</li>
+<li>✅ <strong>Potenza istantanea</strong> (V × A)</li>
+<li>✅ <strong>Efficienza batterie</strong> (confronto 3 pacchi)</li>
+<li>✅ <strong>Rate of discharge</strong> (derivata tensione)</li>
+<li>✅ <strong>State of Charge</strong> (SOC stimato)</li>
+<li>✅ <strong>Capacità residua</strong> (Ah rimanenti)</li>
+</ol>
+<h3 id="con-pwm-motori">Con PWM Motori:</h3>
+<ol start="7" type="1">
+<li>✅ <strong>Duty cycle medio/picco</strong></li>
+<li>✅ <strong>Bilanciamento motori</strong> (destra vs sinistra)</li>
+<li>✅ <strong>Vibrazioni/oscillazioni</strong> (FFT PWM)</li>
+<li>✅ <strong>Correlazione consumo-throttle</strong></li>
+</ol>
+<h3 id="con-dati-raw">Con Dati Raw:</h3>
+<ol start="11" type="1">
+<li>✅ <strong>Validazione calibrazione</strong></li>
+<li>✅ <strong>Drift sensori nel tempo</strong></li>
+<li>✅ <strong>Diagnostica hardware</strong></li>
+<li>✅ <strong>Re-calibrazione post-missione</strong></li>
+</ol>
+<hr />
+<h2 id="esempio-output-serial">📈 ESEMPIO OUTPUT SERIAL</h2>
+<pre><code>💾 Salvati 10/1440 campioni long-term (0.7% buffer)
+
+Campione esempio:
+  timestamp: 120000 ms (2 minuti dall&#39;avvio)
+  
+  Batteria 6S#1:
+    v1:  25.10 V
+    c1:   2.30 A
+    rv1:  2.987 V (ADC)
+    rc1:  2.512 V (ACS758)
+    
+  Batteria 6S#2:
+    v2:  24.85 V
+    c2:   2.25 A
+    rv2:  2.965 V (ADC)
+    rc2:  2.505 V (ACS758)
+    
+  Batteria 4S:
+    v3:  16.50 V
+    c3:   0.80 A
+    rv3:  2.945 V (ADC)
+    rc3:  2.498 V (ACS758)
+    
+  PWM Motori:
+    m1:  1650 μs (Right - Avanti)
+    m2:  1500 μs (Left - Neutro)
+    m3:  1500 μs (Under - Neutro)</code></pre>
+<hr />
+<h2 id="conclusione">🎓 CONCLUSIONE</h2>
+<h3 id="riepilogo-registrazione">Riepilogo Registrazione</h3>
+<table>
+<thead>
+<tr>
+<th>Tipo Dato</th>
+<th>RAM (1Hz)</th>
+<th>Flash (0.1Hz)</th>
+<th>CSV Export</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Tensioni calibrate (×3)</td>
+<td>✅</td>
+<td>✅</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>Correnti calibrate (×3)</td>
+<td>✅</td>
+<td>✅</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>Tensioni raw (×3)</td>
+<td>✅</td>
+<td>✅</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>Correnti raw (×3)</td>
+<td>✅</td>
+<td>✅</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>PWM motori (×3)</td>
+<td>✅</td>
+<td>✅</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>Timestamp</td>
+<td>✅</td>
+<td>✅</td>
+<td>✅</td>
+</tr>
+<tr>
+<td><strong>TOTALE PARAMETRI</strong></td>
+<td><strong>16</strong></td>
+<td><strong>16</strong></td>
+<td><strong>17</strong> (+ Source)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="punti-di-forza">Punti di Forza</h3>
+<ol type="1">
+<li>✅ <strong>Completo</strong>: Tutti i dati essenziali
+registrati</li>
+<li>✅ <strong>Ridondante</strong>: Dati raw + calibrati per
+validazione</li>
+<li>✅ <strong>Compatto</strong>: Solo 58 bytes/campione</li>
+<li>✅ <strong>Persistente</strong>: Flash SPIFFS (4 ore)</li>
+<li>✅ <strong>Analizzabile</strong>: CSV compatibile
+Excel/Python/MATLAB</li>
+</ol>
+<hr />
+<p><strong>Il sistema registra TUTTO quello che serve per analisi
+professionali! 📊✨</strong></p>
+</body>
+</html>
