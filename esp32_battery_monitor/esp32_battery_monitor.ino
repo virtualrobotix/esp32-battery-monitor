@@ -1319,11 +1319,13 @@ void handleStorageInfo() {
   
   for (int i = 0; i < 3; i++) {
     if (i > 0) json += ",";
+    float hours = (file_counts[i] * 2.0) / 60.0;
+    float percent = (file_counts[i] / 120.0) * 100.0;
     json += "{";
     json += "\"id\":" + String(i) + ",";
     json += "\"files\":" + String(file_counts[i]) + ",";
-    json += "\"hours\":" + String(hours_bat0 + hours_bat1 + hours_bat2, 1) + ",";
-    json += "\"percent\":" + String((i == 0 ? percent_bat0 : (i == 1 ? percent_bat1 : percent_bat2)), 1) + ",";
+    json += "\"hours\":" + String(hours, 1) + ",";
+    json += "\"percent\":" + String(percent, 1) + ",";
     json += "\"filled\":" + String(flash_logs[i].filled ? "true" : "false") + ",";
     json += "\"current_index\":" + String(flash_logs[i].current_index);
     json += "}";
