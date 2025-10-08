@@ -123,7 +123,7 @@ struct CalibrationData {
 
 // Strutture per Grafici (dati storici ottimizzati)
 struct ChartData {
-  float values[300];        // 300 punti (5 minuti a 1Hz) - ridotto per memoria
+  float values[120];        // 120 punti (2 minuti a 1Hz) - ottimizzato per visualizzazione
   int index;                // Indice corrente
   bool filled;              // Buffer riempito
   unsigned long last_update; // Ultimo aggiornamento
@@ -185,8 +185,14 @@ Preferences preferences;
 // Storage lungo termine
 LongTermStorage longTermStorage;
 #define LONG_TERM_FILE "/data.bin"
-#define LONG_TERM_MAX_POINTS 1440  // 4 ore @ 0.1Hz (1 campione ogni 10 secondi)
-#define LONG_TERM_SAVE_INTERVAL 10000  // Salva ogni 10 secondi
+#define LONG_TERM_MAX_POINTS 14400  // 4 ore @ 1Hz (1 campione al secondo) - OTTIMIZZATO
+#define LONG_TERM_SAVE_INTERVAL 1000  // Salva ogni 1 secondo - OTTIMIZZATO
+
+// Alert memoria
+#define STORAGE_WARNING_PERCENT 90.0
+#define STORAGE_FULL_PERCENT 100.0
+bool storageWarningShown = false;
+bool storageFullWarningShown = false;
 
 // ============================================================================
 // GESTIONE MEMORIA FLASH - IMPOSTAZIONI PERMANENTI
@@ -350,36 +356,46 @@ void saveLongTermDataPoint() {
     }
     longTermStorage.last_save = millis();
     
-    // Debug ogni 10 salvataggi
-    if (longTermStorage.total_points % 10 == 0) {
-      Serial.printf("💾 Salvati %d/%d campioni long-term (%.1f%% buffer)\n", 
+    // Debug ogni 60 salvataggi (ogni minuto)
+    if (longTermStorage.total_points % 60 == 0) {
+      float hours = (longTermStorage.total_points * LONG_TERM_SAVE_INTERVAL) / (1000.0 * 3600.0);
+      Serial.printf("💾 Salvati %d/%d campioni long-term (%.1f%% | %.2fh)\n", 
                     longTermStorage.total_points, LONG_TERM_MAX_POINTS,
-                    (longTermStorage.total_points * 100.0) / LONG_TERM_MAX_POINTS);
+                    (longTermStorage.total_points * 100.0) / LONG_TERM_MAX_POINTS,
+                    hours);
     }
   } else {
     Serial.println("❌ Errore scrittura dati!");
   }
 }
 
-// Leggi campioni dal file long-term
-int readLongTermData(LongTermDataPoint* buffer, int maxPoints, int startIndex = 0) {
+// Leggi campioni dal file long-term con decimazione opzionale
+int readLongTermData(LongTermDataPoint* buffer, int maxPoints, int startIndex = 0, int decimation = 1) {
   if (!longTermStorage.initialized) return 0;
   
   File file = SPIFFS.open(LONG_TERM_FILE, FILE_READ);
   if (!file) return 0;
   
-  int pointsToRead = min(maxPoints, longTermStorage.total_points - startIndex);
+  // Calcola punti da leggere considerando decimazione
+  int availablePoints = longTermStorage.total_points - startIndex;
+  int pointsToRead = min(maxPoints, (availablePoints + decimation - 1) / decimation);
+  
   if (pointsToRead <= 0) {
     file.close();
     return 0;
   }
   
-  // Posiziona al punto di lettura
-  file.seek(startIndex * sizeof(LongTermDataPoint));
-  
-  // Leggi dati
+  // Leggi dati con decimazione
   int pointsRead = 0;
   for (int i = 0; i < pointsToRead; i++) {
+    // Calcola indice con decimazione
+    int fileIndex = startIndex + (i * decimation);
+    if (fileIndex >= longTermStorage.total_points) break;
+    
+    // Posiziona al punto di lettura
+    file.seek(fileIndex * sizeof(LongTermDataPoint));
+    
+    // Leggi campione
     size_t read = file.read((uint8_t*)&buffer[i], sizeof(LongTermDataPoint));
     if (read == sizeof(LongTermDataPoint)) {
       pointsRead++;
@@ -412,18 +428,103 @@ void clearLongTermStorage() {
   Serial.println("✅ Storage lungo termine azzerato!");
 }
 
-// Ottieni statistiche storage
+// Verifica stato memoria
+bool isStorageFull() {
+  return longTermStorage.total_points >= LONG_TERM_MAX_POINTS;
+}
+
+float getStorageUsagePercent() {
+  if (LONG_TERM_MAX_POINTS == 0) return 0.0;
+  return (longTermStorage.total_points * 100.0) / LONG_TERM_MAX_POINTS;
+}
+
+unsigned long getStorageTimeRemaining() {
+  if (isStorageFull()) return 0;
+  int remaining = LONG_TERM_MAX_POINTS - longTermStorage.total_points;
+  return remaining * (LONG_TERM_SAVE_INTERVAL / 1000); // secondi rimanenti
+}
+
+// Formatta tempo rimanente in formato leggibile
+String formatTimeRemaining(unsigned long seconds) {
+  unsigned long hours = seconds / 3600;
+  unsigned long minutes = (seconds % 3600) / 60;
+  unsigned long secs = seconds % 60;
+  
+  if (hours > 0) {
+    return String(hours) + "h " + String(minutes) + "m";
+  } else if (minutes > 0) {
+    return String(minutes) + "m " + String(secs) + "s";
+  } else {
+    return String(secs) + "s";
+  }
+}
+
+// Controlla e mostra alert memoria
+void checkStorageAlerts() {
+  static unsigned long lastCheck = 0;
+  if (millis() - lastCheck < 30000) return; // Controlla ogni 30 secondi
+  lastCheck = millis();
+  
+  float usage = getStorageUsagePercent();
+  
+  // Alert 90%
+  if (usage >= STORAGE_WARNING_PERCENT && !storageWarningShown) {
+    Serial.println("\n⚠️ ================================");
+    Serial.println("⚠️  ATTENZIONE: Memoria Flash >90%");
+    Serial.printf("⚠️  Uso: %.1f%% (%d/%d campioni)\n", 
+                  usage, longTermStorage.total_points, LONG_TERM_MAX_POINTS);
+    Serial.println("⚠️  SCARICA DATI PRIMA CHE I VECCHI VENGANO SOVRASCRITTI!");
+    Serial.println("⚠️  http://192.168.4.1/csv");
+    
+    unsigned long remaining = getStorageTimeRemaining();
+    Serial.printf("⚠️  Tempo rimanente: %s\n", formatTimeRemaining(remaining).c_str());
+    Serial.println("⚠️ ================================\n");
+    storageWarningShown = true;
+  }
+  
+  // Alert 100% (Full)
+  if (usage >= STORAGE_FULL_PERCENT && !storageFullWarningShown) {
+    Serial.println("\n🔴 ================================");
+    Serial.println("🔴  MEMORIA PIENA!");
+    Serial.println("🔴  Modalità ROLLING: Sovrascrivendo dati più vecchi...");
+    Serial.println("🔴  SCARICA SUBITO I DATI: http://192.168.4.1/csv");
+    Serial.println("🔴 ================================\n");
+    storageFullWarningShown = true;
+  }
+  
+  // Reset warning se scaricato/azzerato (sotto 80%)
+  if (usage < 80.0) {
+    storageWarningShown = false;
+    storageFullWarningShown = false;
+  }
+}
+
+// Ottieni statistiche storage (AGGIORNATO)
 void getLongTermStorageInfo(JsonObject& info) {
   info["initialized"] = longTermStorage.initialized;
   info["total_points"] = longTermStorage.total_points;
   info["max_points"] = LONG_TERM_MAX_POINTS;
   info["write_index"] = longTermStorage.write_index;
+  info["sample_rate_hz"] = 1000.0 / LONG_TERM_SAVE_INTERVAL;
+  
+  // Calcola percentuale uso
+  float usage = getStorageUsagePercent();
+  info["usage_percent"] = usage;
+  info["is_full"] = isStorageFull();
   
   if (longTermStorage.initialized && longTermStorage.total_points > 0) {
     // Calcola durata copertura
     float hours = (longTermStorage.total_points * LONG_TERM_SAVE_INTERVAL) / (1000.0 * 3600.0);
     info["coverage_hours"] = hours;
-    info["percent_full"] = (longTermStorage.total_points * 100.0) / LONG_TERM_MAX_POINTS;
+    
+    // Tempo rimanente
+    if (!isStorageFull()) {
+      unsigned long remaining = getStorageTimeRemaining();
+      info["time_remaining_sec"] = remaining;
+      info["time_remaining_formatted"] = formatTimeRemaining(remaining);
+    } else {
+      info["warning"] = "FULL - Oldest data being overwritten (rolling mode)";
+    }
   }
   
   // Info filesystem
@@ -579,7 +680,7 @@ void initChart(ChartData* chart) {
   chart->max_value = -9999.0;
   chart->avg_value = 0.0;
   chart->total_samples = 0;
-  for (int i = 0; i < 300; i++) {
+  for (int i = 0; i < 120; i++) {  // 2 minuti @ 1Hz
     chart->values[i] = 0.0;
   }
 }
@@ -595,14 +696,14 @@ void addToChart(ChartData* chart, float value) {
   
   // Calcola media mobile
   if (chart->filled) {
-    chart->avg_value = (chart->avg_value * 299 + value) / 300;
+    chart->avg_value = (chart->avg_value * 119 + value) / 120;  // 2 minuti
   } else {
     chart->avg_value = (chart->avg_value * chart->index + value) / (chart->index + 1);
   }
   
-  // CORREZIONE: Incrementa l'indice e gestisci il wrap-around
+  // Incrementa l'indice e gestisci il wrap-around
   chart->index++;
-  if (chart->index >= 300) {
+  if (chart->index >= 120) {  // 2 minuti @ 1Hz
     chart->index = 0;
     chart->filled = true;
   }
@@ -653,13 +754,13 @@ void updateCharts() {
 
 // Ottieni dati grafico per scala temporale specifica
 void getChartData(ChartData* chart, int points, float* output_data, int* actual_points) {
-  int total_points = chart->filled ? 300 : chart->index;
+  int total_points = chart->filled ? 120 : chart->index;  // 2 minuti max
   int step = max(1, total_points / points);
   *actual_points = min(points, total_points / step);
   
   int start = chart->filled ? chart->index : 0;
   for (int i = 0; i < *actual_points; i++) {
-    int idx = (start + i * step) % 300;
+    int idx = (start + i * step) % 120;  // 2 minuti buffer
     output_data[i] = chart->values[idx];
   }
 }
@@ -914,36 +1015,61 @@ void handleCharts() {
   String scale = server.arg("scale");
   int points = 60;
   bool useLongTerm = false;
+  int decimation = 1;  // Fattore di decimazione (1 = nessuna decimazione)
   
-  // Scale temporali - RAM per scale brevi, Flash per scale lunghe
+  // Scale temporali con DECIMAZIONE INTELLIGENTE per performance
+  // RAM: Nessuna decimazione (già veloci)
+  // Flash brevi: Nessuna decimazione
+  // Flash lunghe: Decimazione 3x o 10x per ridurre carico
+  
   if (scale == "10s") {
-    points = 10;      // 10 secondi @ 1Hz (RAM)
+    points = 10;
+    decimation = 1;
+    useLongTerm = false;
+  } else if (scale == "30s") {
+    points = 30;
+    decimation = 1;
     useLongTerm = false;
   } else if (scale == "1m") {
-    points = 60;      // 1 minuto @ 1Hz (RAM)
+    points = 60;
+    decimation = 1;
+    useLongTerm = false;
+  } else if (scale == "2m") {
+    points = 120;
+    decimation = 1;
     useLongTerm = false;
   } else if (scale == "5m") {
-    points = 300;     // 5 minuti @ 1Hz (RAM - tutto il buffer)
-    useLongTerm = false;
+    points = 300;     // 5 minuti @ 1Hz - nessuna decimazione
+    decimation = 1;
+    useLongTerm = true;
   } else if (scale == "10m") {
-    points = 60;      // 10 minuti @ 0.1Hz (Flash)
+    points = 600;     // 10 minuti @ 1Hz - nessuna decimazione
+    decimation = 1;
     useLongTerm = true;
   } else if (scale == "30m") {
-    points = 180;     // 30 minuti @ 0.1Hz (Flash)
+    points = 600;     // 30 minuti @ 3 sec (decimato 3x) ⚡ OTTIMIZZATO
+    decimation = 3;
     useLongTerm = true;
   } else if (scale == "1h") {
-    points = 360;     // 1 ora @ 0.1Hz (Flash)
+    points = 360;     // 1 ora @ 10 sec (decimato 10x) ⚡ OTTIMIZZATO
+    decimation = 10;
+    useLongTerm = true;
+  } else if (scale == "2h") {
+    points = 720;     // 2 ore @ 10 sec (decimato 10x) ⚡ OTTIMIZZATO
+    decimation = 10;
     useLongTerm = true;
   } else if (scale == "4h") {
-    points = 1440;    // 4 ore @ 0.1Hz (Flash - tutto il buffer)
+    points = 1440;    // 4 ore @ 10 sec (decimato 10x) ⚡ OTTIMIZZATO
+    decimation = 10;
     useLongTerm = true;
   } else {
-    points = 60;      // Default 1 minuto
+    points = 60;
+    decimation = 1;
     useLongTerm = false;
   }
   
-  // Buffer temporaneo per i dati
-  float temp_data[1500];  // Aumentato per supportare 4 ore
+  // Buffer temporaneo per i dati (ridotto grazie a decimazione)
+  float temp_data[2000];  // Max 1440 punti con decimazione
   int actual_points;
   
   // Prepara array per dati
@@ -956,7 +1082,7 @@ void handleCharts() {
   JsonArray currentStats = doc.createNestedArray("current_stats");
   
   if (useLongTerm && longTermStorage.initialized) {
-    // ===== DATI DA FLASH (Scale lunghe: 10m, 30m, 1h, 4h) =====
+    // ===== DATI DA FLASH (Scale lunghe: 5m, 10m, 30m, 1h, 2h, 4h) =====
     
     // Alloca buffer per lettura long-term
     LongTermDataPoint* ltBuffer = new LongTermDataPoint[points];
@@ -969,9 +1095,15 @@ void handleCharts() {
       return;
     }
     
-    // Leggi dati long-term
-    int ltPoints = readLongTermData(ltBuffer, points, 0);
+    // Leggi dati long-term con decimazione
+    int ltPoints = readLongTermData(ltBuffer, points, 0, decimation);
     actual_points = ltPoints;
+    
+    // Debug decimazione
+    if (decimation > 1) {
+      Serial.printf("📊 Grafico '%s': %d punti (decimazione %dx)\n", 
+                    scale.c_str(), ltPoints, decimation);
+    }
     
     // Estrai dati per ogni batteria
     for (int i = 0; i < 3; i++) {
@@ -1114,6 +1246,8 @@ void handleCharts() {
   doc["points"] = actual_points;
   doc["timestamp"] = millis();
   doc["source"] = useLongTerm ? "flash" : "ram";
+  doc["decimation"] = decimation;
+  doc["sample_interval_sec"] = decimation;  // Intervallo effettivo tra campioni
   
   // Info storage
   JsonObject storageInfo = doc.createNestedObject("storage_info");
@@ -1546,16 +1680,19 @@ void handleChartsPage() {
   html += "<div class='controls'>";
   html += "<label>Scala temporale:</label>";
   html += "<select id='timeScale' onchange='changeScale()'>";
-  html += "<optgroup label='📊 RAM (Veloce - 1Hz)'>";
+  html += "<optgroup label='📊 RAM (Real-Time - 1Hz)'>";
   html += "<option value='10s'>10 secondi</option>";
+  html += "<option value='30s'>30 secondi</option>";
   html += "<option value='1m' selected>1 minuto</option>";
-  html += "<option value='5m'>5 minuti</option>";
+  html += "<option value='2m'>2 minuti</option>";
   html += "</optgroup>";
-  html += "<optgroup label='💾 Flash (Lungo - 0.1Hz)'>";
-  html += "<option value='10m'>10 minuti</option>";
-  html += "<option value='30m'>30 minuti</option>";
-  html += "<option value='1h'>1 ora</option>";
-  html += "<option value='4h'>4 ore</option>";
+  html += "<optgroup label='💾 Flash (Storico)'>";
+  html += "<option value='5m'>5 minuti (1s)</option>";
+  html += "<option value='10m'>10 minuti (1s)</option>";
+  html += "<option value='30m'>30 minuti (3s)</option>";
+  html += "<option value='1h'>1 ora (10s)</option>";
+  html += "<option value='2h'>2 ore (10s)</option>";
+  html += "<option value='4h'>4 ore (10s)</option>";
   html += "</optgroup>";
   html += "</select>";
   html += "<button onclick='exportCSV()'>📥 Esporta CSV</button>";
@@ -1638,12 +1775,27 @@ void handleChartsPage() {
   html += "";
   html += "function updateStorageInfo(storageInfo){";
   html += "if(!storageInfo||!storageInfo.initialized)return;";
+  html += "let usage=storageInfo.usage_percent||0;";
   html += "let info='💾 Flash: '+storageInfo.total_points+'/'+storageInfo.max_points+' campioni';";
   html += "if(storageInfo.coverage_hours){";
   html += "info+=' ('+storageInfo.coverage_hours.toFixed(1)+'h)';";
   html += "}";
+  html += "if(storageInfo.time_remaining_formatted&&!storageInfo.is_full){";
+  html += "info+=' | ⏱️ '+storageInfo.time_remaining_formatted+' rimasti';";
+  html += "}";
   html += "info+=' | '+storageInfo.spiffs_used_kb+'/'+storageInfo.spiffs_total_kb+'KB';";
-  html += "document.getElementById('storageInfo').textContent=info;";
+  html += "if(usage<50){info+=' ✅';}";
+  html += "else if(usage<90){info+=' ⚠️';}";
+  html += "else{info+=' 🔴';}";
+  html += "let elem=document.getElementById('storageInfo');";
+  html += "elem.textContent=info;";
+  html += "if(usage>=90){elem.style.color='#ef4444';elem.style.fontWeight='bold';}";
+  html += "else if(usage>=75){elem.style.color='#f59e0b';}";
+  html += "else{elem.style.color='#94a3b8';}";
+  html += "if(storageInfo.is_full&&!window.fullAlertShown){";
+  html += "alert('🔴 MEMORIA PIENA!\\n\\nI dati più vecchi verranno sovrascritti.\\n\\nScarica CSV ora: http://192.168.4.1/csv');";
+  html += "window.fullAlertShown=true;";
+  html += "}";
   html += "}";
   html += "";
   html += "function changeScale(){";
@@ -1667,6 +1819,7 @@ void handleChartsPage() {
   html += "}";
   html += "";
   html += "function update(){";
+  html += "let startTime=Date.now();";
   html += "fetch('/charts-data?scale='+currentScale)";
   html += ".then(function(r){return r.json();})";
   html += ".then(function(d){";
@@ -1679,6 +1832,8 @@ void handleChartsPage() {
   html += "drawChart(rcCtx,d.raw_current || [],'raw');";
   html += "drawChart(mCtx,d.motors || [],'motor');";
   html += "if(d.storage_info){updateStorageInfo(d.storage_info);}";
+  html += "let elapsed=(Date.now()-startTime)/1000;";
+  html += "console.log('⚡ Grafico '+d.scale+': '+d.points+' punti in '+elapsed.toFixed(1)+'s (decimazione: '+d.decimation+'x)');";
   html += "}";
   html += "})";
   html += ".catch(function(e){console.error('Errore:',e);});";
@@ -1901,9 +2056,11 @@ void handleAPI() {
 
 void setup() {
   Serial.begin(115200);
-  Serial.println("🚀 AlixBlimp Battery Monitor & Motor Control v2.0");
+  Serial.println("🚀 AlixBlimp Battery Monitor & Motor Control v2.1 OPTIMIZED");
   Serial.println("========================================");
-  Serial.println("📦 Storage Multi-Rate: RAM (5min @ 1Hz) + Flash (4h @ 0.1Hz)");
+  Serial.println("📦 Storage Ottimizzato: RAM (2min @ 1Hz) + Flash (4h @ 1Hz)");
+  Serial.println("⚡ Risoluzione: 1 campione/sec - Cattura transitori corrente/PWM");
+  Serial.println("💾 Capacità: 14,400 campioni (4 ore) - Modalità Rolling");
   Serial.println();
   
   // Configurazione Pin
@@ -1989,8 +2146,11 @@ void loop() {
   // Aggiorna grafici RAM (ogni 1s)
   updateCharts();
   
-  // Salva dati su Flash per storage lungo termine (ogni 10s)
+  // Salva dati su Flash per storage lungo termine (ogni 1s - OTTIMIZZATO)
   saveLongTermDataPoint();
+  
+  // Controlla alert memoria Flash (ogni 30s)
+  checkStorageAlerts();
   
   // Web Server
   server.handleClient();
