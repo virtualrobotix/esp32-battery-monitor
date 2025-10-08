@@ -551,13 +551,24 @@ void updateCharts() {
 // Ottieni dati grafico per scala temporale specifica
 void getChartData(ChartData* chart, int points, float* output_data, int* actual_points) {
   int total_points = chart->filled ? 120 : chart->index;
-  int step = max(1, total_points / points);
-  *actual_points = min(points, total_points / step);
   
-  int start = chart->filled ? chart->index : 0;
-  for (int i = 0; i < *actual_points; i++) {
-    int idx = (start + i * step) % 120;
-    output_data[i] = chart->values[idx];
+  // Se ci sono meno punti richiesti di quelli disponibili, prendi tutti
+  if (points >= total_points) {
+    *actual_points = total_points;
+    int start = chart->filled ? chart->index : 0;
+    for (int i = 0; i < *actual_points; i++) {
+      int idx = (start + i) % 120;
+      output_data[i] = chart->values[idx];
+    }
+  } else {
+    // Decimazione: prendi un campione ogni 'step'
+    int step = total_points / points;
+    *actual_points = points;
+    int start = chart->filled ? chart->index : 0;
+    for (int i = 0; i < *actual_points; i++) {
+      int idx = (start + i * step) % 120;
+      output_data[i] = chart->values[idx];
+    }
   }
 }
 
