@@ -1086,7 +1086,7 @@ void handleCalibration() {
 }
 
 void handleCharts() {
-  DynamicJsonDocument doc(16384);  // 16KB per gestire 120 punti × 5 grafici × 3 batterie
+  DynamicJsonDocument doc(32768);  // 32KB per gestire 120 punti × 5 grafici × 3 batterie
   
   // Ottieni parametri query
   String scale = server.arg("scale");
