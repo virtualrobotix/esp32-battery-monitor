@@ -687,8 +687,11 @@ void processAsyncSaves() {
         file.close();
         
         if (written == sizeof(FlashLogSnapshot)) {
-          // Successo
+          // Successo: salva metadati su NVS
           flash_logs[buffer->battery_index].save_pending = false;
+          saveLogsMetadata();
+          
+          Serial.printf("✅ Salvato %s (%d KB)\n", filename, sizeof(FlashLogSnapshot)/1024);
         } else {
           Serial.printf("❌ Errore scrittura %s\n", filename);
         }
@@ -725,36 +728,41 @@ void saveLogsToFlash() {
                 flash_logs[0].current_index);
 }
 
-// Carica log dalla flash (per ripristino dopo reboot)
+// Carica metadati log da NVS (per ripristino dopo reboot)
 void loadLogsFromFlash() {
   preferences.begin("logs", true);
   
   for (int i = 0; i < 3; i++) {
     String prefix = "log" + String(i) + "_";
     
-    flash_logs[i].index = preferences.getInt((prefix + "idx").c_str(), 0);
+    // Carica solo i metadati (i dati veri sono su SPIFFS)
+    flash_logs[i].snapshot_count = preferences.getInt((prefix + "snap_cnt").c_str(), 0);
+    flash_logs[i].current_index = preferences.getInt((prefix + "curr_idx").c_str(), 0);
     flash_logs[i].filled = preferences.getBool((prefix + "filled").c_str(), false);
-    flash_logs[i].last_save = millis();
+    flash_logs[i].last_save = millis(); // Reset timestamp al boot
+    flash_logs[i].save_pending = false; // Nessun salvataggio pendente al boot
     
-    // Carica solo gli ultimi 10 campioni per risparmiare tempo di boot
-    int entries_to_load = min(10, flash_logs[i].index);
-    for (int j = 0; j < entries_to_load; j++) {
-      String entry_prefix = prefix + "e" + String(j) + "_";
-      int real_idx = (flash_logs[i].index - entries_to_load + j + 240) % 240;
-      
-      flash_logs[i].entries[real_idx].timestamp = 
-        preferences.getULong((entry_prefix + "ts").c_str(), 0);
-      flash_logs[i].entries[real_idx].voltage = 
-        preferences.getFloat((entry_prefix + "v").c_str(), 0.0);
-      flash_logs[i].entries[real_idx].current = 
-        preferences.getFloat((entry_prefix + "c").c_str(), 0.0);
-      flash_logs[i].entries[real_idx].power = 
-        preferences.getFloat((entry_prefix + "p").c_str(), 0.0);
-    }
+    Serial.printf("📂 Bat%d: %d snapshot, indice %d, %s\n", 
+                  i, flash_logs[i].snapshot_count, flash_logs[i].current_index,
+                  flash_logs[i].filled ? "pieno" : "parziale");
   }
   
   preferences.end();
-  Serial.println("📂 Log caricati dalla flash");
+}
+
+// Salva metadati log su NVS (chiamato dopo ogni scrittura SPIFFS)
+void saveLogsMetadata() {
+  preferences.begin("logs", false);
+  
+  for (int i = 0; i < 3; i++) {
+    String prefix = "log" + String(i) + "_";
+    
+    preferences.putInt((prefix + "snap_cnt").c_str(), flash_logs[i].snapshot_count);
+    preferences.putInt((prefix + "curr_idx").c_str(), flash_logs[i].current_index);
+    preferences.putBool((prefix + "filled").c_str(), flash_logs[i].filled);
+  }
+  
+  preferences.end();
 }
 
 // Esporta log da SPIFFS come JSON per API
