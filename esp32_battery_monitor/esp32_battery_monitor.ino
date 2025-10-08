@@ -224,7 +224,14 @@ void resetCalibrationToDefault() {
     calibration[i].voltage_scale = 1.0;
     calibration[i].current_offset = 0.0;
     calibration[i].current_scale = 1.0;
-    calibration[i].divider_ratio = DIVIDER_6S_RATIO;
+    
+    // Valori di default per partitori
+    if (i < 2) { // 6S batteries
+      calibration[i].divider_ratio = DIVIDER_6S_RATIO;
+    } else { // 4S battery
+      calibration[i].divider_ratio = DIVIDER_4S_RATIO;
+    }
+    
     calibration[i].acs758_vref = ACS758_VREF_DEFAULT;
     calibration[i].acs758_sensitivity = ACS758_SENSITIVITY_DEFAULT;
   }
@@ -243,7 +250,14 @@ void initCalibration() {
     calibration[i].voltage_scale = 1.0;
     calibration[i].current_offset = 0.0;
     calibration[i].current_scale = 1.0;
-    calibration[i].divider_ratio = DIVIDER_6S_RATIO;
+    
+    // Valori di default per partitori
+    if (i < 2) { // 6S batteries
+      calibration[i].divider_ratio = DIVIDER_6S_RATIO;
+    } else { // 4S battery
+      calibration[i].divider_ratio = DIVIDER_4S_RATIO;
+    }
+    
     calibration[i].acs758_vref = ACS758_VREF_DEFAULT;
     calibration[i].acs758_sensitivity = ACS758_SENSITIVITY_DEFAULT;
   }
@@ -462,21 +476,6 @@ void addToChart(ChartData* chart, float value) {
 }
 
 // Inizializza taratura con valori di default
-void initCalibration() {
-  for (int i = 0; i < 3; i++) {
-    calibration[i].voltage_offset = 0.0;
-    calibration[i].voltage_scale = 1.0;
-    calibration[i].current_offset = 0.0;
-    calibration[i].current_scale = 1.0;
-    
-    // Valori di default per partitori
-    if (i < 2) { // 6S batteries
-      calibration[i].divider_ratio = DIVIDER_6S_RATIO;
-    } else { // 4S battery
-      calibration[i].divider_ratio = DIVIDER_4S_RATIO;
-    }
-  }
-}
 
 // Aggiorna grafici con frequenza ottimizzata
 void updateCharts() {
