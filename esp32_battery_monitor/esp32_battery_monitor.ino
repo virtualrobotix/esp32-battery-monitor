@@ -1,4 +1,4 @@
-    /*
+/*
  * AlixBlimp Battery Monitor & Differential Motor Control
  * 
  * Funzionalità:
@@ -18,6 +18,8 @@
 #include <WebServer.h>
 #include <ArduinoJson.h>
 #include <Preferences.h>
+#include <SPIFFS.h>
+#include <FS.h>
 
 // ============================================================================
 // CONFIGURAZIONE PIN
@@ -40,7 +42,7 @@
 
 // Digital Input per Direzione
 #define DIR_RIGHT_PIN      21    // GPIO21 - Direzione Motore Destro
-#define DIR_LEFT_PIN       23    // GPIO23 - Direzione Motore Sinistro
+#define DIR_LEFT_PIN       17    // GPIO17 - Direzione Motore Sinistro
 
 // PWM Output per Motori
 #define PWM_OUT_RIGHT      26    // GPIO25 - Motore Destro
@@ -60,8 +62,8 @@
 #define ACS758_VREF        2.5   // Tensione di riferimento (VCC/2)
 
 // Parametri Partitori Tensione
-#define DIVIDER_6S_RATIO   11   // 33.6V -> 3.05V
-#define DIVIDER_4S_RATIO   11   // 12.6V -> 1.15V
+#define DIVIDER_6S_RATIO   8.4   // 25.2V -> 3.0V
+#define DIVIDER_4S_RATIO   5.6   // 16.8V -> 3.0V
 
 // Parametri PWM
 #define PWM_FREQ           50    // 50Hz per ESC/Servo
@@ -77,10 +79,8 @@
 // ============================================================================
 // CONFIGURAZIONE LEDC CHANNELS
 // ============================================================================
-#define PWM_OUT_RIGHT_CHANNEL  0    // LEDC Channel 0 - PWM Motore Destro
-#define PWM_OUT_LEFT_CHANNEL   1    // LEDC Channel 1 - PWM Motore Sinistro
-#define DIR_RIGHT_CHANNEL      2    // LEDC Channel 2 - Direzione Motore Destro
-#define DIR_LEFT_CHANNEL       3    // LEDC Channel 3 - Direzione Motore Sinistro
+#define PWM_OUT_RIGHT_CHANNEL  0    // LEDC Channel 0
+#define PWM_OUT_LEFT_CHANNEL   1    // LEDC Channel 1
 
 // ============================================================================
 // VARIABILI GLOBALI
@@ -133,6 +133,28 @@ struct ChartData {
   unsigned long total_samples; // Totale campioni raccolti
 };
 
+// Struttura per dati persistenti su Flash (storage lungo termine)
+struct LongTermDataPoint {
+  uint32_t timestamp;       // 4 bytes - millisecondi dall'avvio
+  // Batterie (dati convertiti)
+  float v1, c1, v2, c2, v3, c3;  // 24 bytes - tensioni e correnti
+  // Dati raw
+  float rv1, rc1, rv2, rc2, rv3, rc3;  // 24 bytes
+  // PWM motori
+  uint16_t m1, m2, m3;      // 6 bytes
+  // Totale: 58 bytes per campione
+  // 4 ore @ 0.1Hz = 1440 campioni = 83,520 bytes (~82KB)
+} __attribute__((packed));
+
+// Gestione storage lungo termine
+struct LongTermStorage {
+  int write_index;          // Indice scrittura (circolare)
+  int total_points;         // Punti totali salvati
+  unsigned long last_save;  // Ultimo salvataggio
+  bool initialized;         // Flag inizializzazione
+  File dataFile;            // File handle
+};
+
 // Dati Sistema
 BatteryData batteries[3];  // 0=6S#1, 1=6S#2, 2=4S
 PWMData autopilot_input;
@@ -159,6 +181,12 @@ const char* ssid = "ESP32_BatteryMonitor";
 const char* password = "battery123";
 WebServer server(80);
 Preferences preferences;
+
+// Storage lungo termine
+LongTermStorage longTermStorage;
+#define LONG_TERM_FILE "/data.bin"
+#define LONG_TERM_MAX_POINTS 1440  // 4 ore @ 0.1Hz (1 campione ogni 10 secondi)
+#define LONG_TERM_SAVE_INTERVAL 10000  // Salva ogni 10 secondi
 
 // ============================================================================
 // GESTIONE MEMORIA FLASH - IMPOSTAZIONI PERMANENTI
@@ -220,6 +248,191 @@ void resetCalibrationToDefault() {
 }
 
 // ============================================================================
+// GESTIONE STORAGE LUNGO TERMINE - SPIFFS
+// ============================================================================
+
+// Inizializza SPIFFS e file dati
+bool initLongTermStorage() {
+  Serial.println("💾 Inizializzazione SPIFFS...");
+  
+  if (!SPIFFS.begin(true)) {
+    Serial.println("❌ Errore montaggio SPIFFS!");
+    longTermStorage.initialized = false;
+    return false;
+  }
+  
+  // Informazioni filesystem
+  size_t totalBytes = SPIFFS.totalBytes();
+  size_t usedBytes = SPIFFS.usedBytes();
+  Serial.printf("📊 SPIFFS: %d KB totali, %d KB usati, %d KB liberi\n", 
+                totalBytes/1024, usedBytes/1024, (totalBytes-usedBytes)/1024);
+  
+  // Controlla se esiste file dati
+  if (SPIFFS.exists(LONG_TERM_FILE)) {
+    File file = SPIFFS.open(LONG_TERM_FILE, FILE_READ);
+    if (file) {
+      size_t fileSize = file.size();
+      int points = fileSize / sizeof(LongTermDataPoint);
+      Serial.printf("📂 File dati esistente: %d bytes, %d campioni\n", fileSize, points);
+      
+      longTermStorage.total_points = min(points, LONG_TERM_MAX_POINTS);
+      longTermStorage.write_index = longTermStorage.total_points % LONG_TERM_MAX_POINTS;
+      file.close();
+    }
+  } else {
+    Serial.println("📝 Creazione nuovo file dati...");
+    File file = SPIFFS.open(LONG_TERM_FILE, FILE_WRITE);
+    if (file) {
+      file.close();
+      longTermStorage.total_points = 0;
+      longTermStorage.write_index = 0;
+    }
+  }
+  
+  longTermStorage.last_save = 0;
+  longTermStorage.initialized = true;
+  Serial.println("✅ Storage lungo termine inizializzato!");
+  
+  return true;
+}
+
+// Salva un campione su SPIFFS
+void saveLongTermDataPoint() {
+  if (!longTermStorage.initialized) return;
+  
+  if (millis() - longTermStorage.last_save < LONG_TERM_SAVE_INTERVAL) return;
+  
+  // Prepara struttura dati
+  LongTermDataPoint dataPoint;
+  dataPoint.timestamp = millis();
+  
+  // Dati batterie convertiti
+  dataPoint.v1 = batteries[0].voltage;
+  dataPoint.c1 = batteries[0].current;
+  dataPoint.v2 = batteries[1].voltage;
+  dataPoint.c2 = batteries[1].current;
+  dataPoint.v3 = batteries[2].voltage;
+  dataPoint.c3 = batteries[2].current;
+  
+  // Dati raw
+  dataPoint.rv1 = batteries[0].raw_voltage_voltage;
+  dataPoint.rc1 = batteries[0].raw_current_voltage;
+  dataPoint.rv2 = batteries[1].raw_voltage_voltage;
+  dataPoint.rc2 = batteries[1].raw_current_voltage;
+  dataPoint.rv3 = batteries[2].raw_voltage_voltage;
+  dataPoint.rc3 = batteries[2].raw_current_voltage;
+  
+  // PWM motori
+  dataPoint.m1 = autopilot_input.motor_right;
+  dataPoint.m2 = autopilot_input.motor_left;
+  dataPoint.m3 = autopilot_input.motor_under;
+  
+  // Apri file in modalità lettura/scrittura
+  File file = SPIFFS.open(LONG_TERM_FILE, FILE_WRITE);
+  if (!file) {
+    Serial.println("❌ Errore apertura file per scrittura!");
+    return;
+  }
+  
+  // Posiziona al punto di scrittura (circular buffer)
+  size_t seekPos = (longTermStorage.write_index * sizeof(LongTermDataPoint));
+  file.seek(seekPos);
+  
+  // Scrivi dati
+  size_t written = file.write((uint8_t*)&dataPoint, sizeof(LongTermDataPoint));
+  file.close();
+  
+  if (written == sizeof(LongTermDataPoint)) {
+    // Aggiorna indici
+    longTermStorage.write_index = (longTermStorage.write_index + 1) % LONG_TERM_MAX_POINTS;
+    if (longTermStorage.total_points < LONG_TERM_MAX_POINTS) {
+      longTermStorage.total_points++;
+    }
+    longTermStorage.last_save = millis();
+    
+    // Debug ogni 10 salvataggi
+    if (longTermStorage.total_points % 10 == 0) {
+      Serial.printf("💾 Salvati %d/%d campioni long-term (%.1f%% buffer)\n", 
+                    longTermStorage.total_points, LONG_TERM_MAX_POINTS,
+                    (longTermStorage.total_points * 100.0) / LONG_TERM_MAX_POINTS);
+    }
+  } else {
+    Serial.println("❌ Errore scrittura dati!");
+  }
+}
+
+// Leggi campioni dal file long-term
+int readLongTermData(LongTermDataPoint* buffer, int maxPoints, int startIndex = 0) {
+  if (!longTermStorage.initialized) return 0;
+  
+  File file = SPIFFS.open(LONG_TERM_FILE, FILE_READ);
+  if (!file) return 0;
+  
+  int pointsToRead = min(maxPoints, longTermStorage.total_points - startIndex);
+  if (pointsToRead <= 0) {
+    file.close();
+    return 0;
+  }
+  
+  // Posiziona al punto di lettura
+  file.seek(startIndex * sizeof(LongTermDataPoint));
+  
+  // Leggi dati
+  int pointsRead = 0;
+  for (int i = 0; i < pointsToRead; i++) {
+    size_t read = file.read((uint8_t*)&buffer[i], sizeof(LongTermDataPoint));
+    if (read == sizeof(LongTermDataPoint)) {
+      pointsRead++;
+    } else {
+      break;
+    }
+  }
+  
+  file.close();
+  return pointsRead;
+}
+
+// Azzera storage lungo termine
+void clearLongTermStorage() {
+  if (!longTermStorage.initialized) return;
+  
+  Serial.println("🗑️ Cancellazione storage lungo termine...");
+  
+  SPIFFS.remove(LONG_TERM_FILE);
+  
+  File file = SPIFFS.open(LONG_TERM_FILE, FILE_WRITE);
+  if (file) {
+    file.close();
+  }
+  
+  longTermStorage.total_points = 0;
+  longTermStorage.write_index = 0;
+  longTermStorage.last_save = 0;
+  
+  Serial.println("✅ Storage lungo termine azzerato!");
+}
+
+// Ottieni statistiche storage
+void getLongTermStorageInfo(JsonObject& info) {
+  info["initialized"] = longTermStorage.initialized;
+  info["total_points"] = longTermStorage.total_points;
+  info["max_points"] = LONG_TERM_MAX_POINTS;
+  info["write_index"] = longTermStorage.write_index;
+  
+  if (longTermStorage.initialized && longTermStorage.total_points > 0) {
+    // Calcola durata copertura
+    float hours = (longTermStorage.total_points * LONG_TERM_SAVE_INTERVAL) / (1000.0 * 3600.0);
+    info["coverage_hours"] = hours;
+    info["percent_full"] = (longTermStorage.total_points * 100.0) / LONG_TERM_MAX_POINTS;
+  }
+  
+  // Info filesystem
+  info["spiffs_total_kb"] = SPIFFS.totalBytes() / 1024;
+  info["spiffs_used_kb"] = SPIFFS.usedBytes() / 1024;
+  info["spiffs_free_kb"] = (SPIFFS.totalBytes() - SPIFFS.usedBytes()) / 1024;
+}
+
+// ============================================================================
 // FUNZIONI UTILITY
 // ============================================================================
 
@@ -278,26 +491,14 @@ uint16_t readPWM(int pin) {
 void writePWM(int pin, uint16_t pulse_width) {
   // Calcola duty cycle per impulsi da 1000-2000μs a 50Hz
   // Periodo = 20ms = 20,000μs
-  // Duty cycle = (pulse_width / 20000) * 4095 (12-bit resolution)
-  uint16_t duty = (pulse_width * 4095) / 20000;
+  // Duty cycle = (pulse_width / 20000) * (2^PWM_RESOLUTION - 1)
+  uint32_t max_duty = (1 << PWM_RESOLUTION) - 1;  // 2^16 - 1 = 65535 per 16-bit
+  uint32_t duty = (pulse_width * max_duty) / 20000;
   
   if (pin == PWM_OUT_RIGHT) {
     ledcWrite(PWM_OUT_RIGHT_CHANNEL, duty);
   } else if (pin == PWM_OUT_LEFT) {
     ledcWrite(PWM_OUT_LEFT_CHANNEL, duty);
-  }
-}
-
-// Scrittura PWM per pin di direzione
-void writeDirPWM(int pin, bool active) {
-  // Se attivo: PWM a 1500μs, se disattivo: PWM a 1000μs (o 0)
-  uint16_t pulse_width = active ? 2000 : 1000;
-  uint16_t duty = (pulse_width * 4095) / 20000;
-  
-  if (pin == DIR_RIGHT_PIN) {
-    ledcWrite(DIR_RIGHT_CHANNEL, duty);
-  } else if (pin == DIR_LEFT_PIN) {
-    ledcWrite(DIR_LEFT_CHANNEL, duty);
   }
 }
 
@@ -399,6 +600,7 @@ void addToChart(ChartData* chart, float value) {
     chart->avg_value = (chart->avg_value * chart->index + value) / (chart->index + 1);
   }
   
+  // CORREZIONE: Incrementa l'indice e gestisci il wrap-around
   chart->index++;
   if (chart->index >= 300) {
     chart->index = 0;
@@ -546,24 +748,24 @@ void calculateMotorOutput() {
   uint16_t left_input = autopilot_input.motor_left;
   
   // Logica corretta PWM:
-  // AVANTI: 1500→1000, 2000→2000 (PWM ATTIVO)
-  // INDIETRO: 1500→1000, 1000→2000 (PWM DISATTIVO)
+  // AVANTI: 1500→1000, 2000→2000 (HIGH)
+  // INDIETRO: 1500→1000, 1000→2000 (LOW)
   // Per motore destro
   if (right_input <= PWM_CENTER) {
     // 1000-1500: BACKWARD - mappa 1000→2000, 1500→1000
     motor_output.right_pwm = map(right_input, PWM_MIN, PWM_CENTER, PWM_MAX, PWM_MIN);
-    writeDirPWM(DIR_RIGHT_PIN, false);  // BACKWARD - PWM DISATTIVO
+    digitalWrite(DIR_RIGHT_PIN, LOW);  // BACKWARD - DISATTIVO
     // DEBUG: Stampa quando va indietro
     if (right_input < 1500) {
-      Serial.printf("🔙 MOTORE DESTRO INDIETRO: Input=%d, Output=%d, DIR=PWM_OFF\n", right_input, motor_output.right_pwm);
+      Serial.printf("🔙 MOTORE DESTRO INDIETRO: Input=%d, Output=%d, DIR=LOW\n", right_input, motor_output.right_pwm);
     }
   } else {
     // 1500-2000: FORWARD - mappa 1500→1000, 2000→2000
     motor_output.right_pwm = map(right_input, PWM_CENTER, PWM_MAX, PWM_MIN, PWM_MAX);
-    writeDirPWM(DIR_RIGHT_PIN, true);   // FORWARD - PWM ATTIVO
+    digitalWrite(DIR_RIGHT_PIN, HIGH); // FORWARD - ATTIVO
     // DEBUG: Stampa quando va avanti
     if (right_input > 1500) {
-      Serial.printf("🔜 MOTORE DESTRO AVANTI: Input=%d, Output=%d, DIR=PWM_ON\n", right_input, motor_output.right_pwm);
+      Serial.printf("🔜 MOTORE DESTRO AVANTI: Input=%d, Output=%d, DIR=HIGH\n", right_input, motor_output.right_pwm);
     }
   }
   
@@ -571,18 +773,18 @@ void calculateMotorOutput() {
   if (left_input <= PWM_CENTER) {
     // 1000-1500: BACKWARD - mappa 1000→2000, 1500→1000
     motor_output.left_pwm = map(left_input, PWM_MIN, PWM_CENTER, PWM_MAX, PWM_MIN);
-    writeDirPWM(DIR_LEFT_PIN, false);   // BACKWARD - PWM DISATTIVO
+    digitalWrite(DIR_LEFT_PIN, LOW);   // BACKWARD - DISATTIVO
     // DEBUG: Stampa quando va indietro
     if (left_input < 1500) {
-      Serial.printf("🔙 MOTORE SINISTRO INDIETRO: Input=%d, Output=%d, DIR=PWM_OFF\n", left_input, motor_output.left_pwm);
+      Serial.printf("🔙 MOTORE SINISTRO INDIETRO: Input=%d, Output=%d, DIR=LOW\n", left_input, motor_output.left_pwm);
     }
   } else {
     // 1500-2000: FORWARD - mappa 1500→1000, 2000→2000
     motor_output.left_pwm = map(left_input, PWM_CENTER, PWM_MAX, PWM_MIN, PWM_MAX);
-    writeDirPWM(DIR_LEFT_PIN, true);    // FORWARD - PWM ATTIVO
+    digitalWrite(DIR_LEFT_PIN, HIGH);  // FORWARD - ATTIVO
     // DEBUG: Stampa quando va avanti
     if (left_input > 1500) {
-      Serial.printf("🔜 MOTORE SINISTRO AVANTI: Input=%d, Output=%d, DIR=PWM_ON\n", left_input, motor_output.left_pwm);
+      Serial.printf("🔜 MOTORE SINISTRO AVANTI: Input=%d, Output=%d, DIR=HIGH\n", left_input, motor_output.left_pwm);
     }
   }
   
@@ -706,91 +908,193 @@ void handleCalibration() {
 }
 
 void handleCharts() {
-  DynamicJsonDocument doc(4096);
+  DynamicJsonDocument doc(8192);  // Aumentato per dati long-term
   
   // Ottieni parametri query
   String scale = server.arg("scale");
-  int points = 60; // Default 5 minuti
+  int points = 60;
+  bool useLongTerm = false;
   
-  if (scale == "10s") points = 10;      // 10 secondi
-  else if (scale == "30s") points = 30; // 30 secondi  
-  else if (scale == "1m") points = 60;  // 1 minuto
-  else if (scale == "2m") points = 120; // 2 minuti
-  else if (scale == "5m") points = 300; // 5 minuti (tutto il buffer)
+  // Scale temporali - RAM per scale brevi, Flash per scale lunghe
+  if (scale == "10s") {
+    points = 10;      // 10 secondi @ 1Hz (RAM)
+    useLongTerm = false;
+  } else if (scale == "1m") {
+    points = 60;      // 1 minuto @ 1Hz (RAM)
+    useLongTerm = false;
+  } else if (scale == "5m") {
+    points = 300;     // 5 minuti @ 1Hz (RAM - tutto il buffer)
+    useLongTerm = false;
+  } else if (scale == "10m") {
+    points = 60;      // 10 minuti @ 0.1Hz (Flash)
+    useLongTerm = true;
+  } else if (scale == "30m") {
+    points = 180;     // 30 minuti @ 0.1Hz (Flash)
+    useLongTerm = true;
+  } else if (scale == "1h") {
+    points = 360;     // 1 ora @ 0.1Hz (Flash)
+    useLongTerm = true;
+  } else if (scale == "4h") {
+    points = 1440;    // 4 ore @ 0.1Hz (Flash - tutto il buffer)
+    useLongTerm = true;
+  } else {
+    points = 60;      // Default 1 minuto
+    useLongTerm = false;
+  }
   
   // Buffer temporaneo per i dati
-  float temp_data[300];
+  float temp_data[1500];  // Aumentato per supportare 4 ore
   int actual_points;
   
-  // Dati grafici tensione
+  // Prepara array per dati
   JsonArray voltageArray = doc.createNestedArray("voltage");
-  JsonArray voltageStats = doc.createNestedArray("voltage_stats");
-  for (int i = 0; i < 3; i++) {
-    JsonArray batteryArray = voltageArray.createNestedArray();
-    JsonObject stats = voltageStats.createNestedObject();
-    
-    getChartData(&voltage_charts[i], points, temp_data, &actual_points);
-    for (int j = 0; j < actual_points; j++) {
-      batteryArray.add(temp_data[j]);
-    }
-    
-    // Aggiungi statistiche
-    float min_val, max_val, avg_val;
-    getChartStats(&voltage_charts[i], &min_val, &max_val, &avg_val);
-    stats["min"] = min_val;
-    stats["max"] = max_val;
-    stats["avg"] = avg_val;
-    stats["samples"] = voltage_charts[i].total_samples;
-  }
-  
-  // Dati grafici corrente
   JsonArray currentArray = doc.createNestedArray("current");
-  JsonArray currentStats = doc.createNestedArray("current_stats");
-  for (int i = 0; i < 3; i++) {
-    JsonArray batteryArray = currentArray.createNestedArray();
-    JsonObject stats = currentStats.createNestedObject();
-    
-    getChartData(&current_charts[i], points, temp_data, &actual_points);
-    for (int j = 0; j < actual_points; j++) {
-      batteryArray.add(temp_data[j]);
-    }
-    
-    // Aggiungi statistiche
-    float min_val, max_val, avg_val;
-    getChartStats(&current_charts[i], &min_val, &max_val, &avg_val);
-    stats["min"] = min_val;
-    stats["max"] = max_val;
-    stats["avg"] = avg_val;
-    stats["samples"] = current_charts[i].total_samples;
-  }
-  
-  // Dati grafici raw tensione
   JsonArray rawVoltageArray = doc.createNestedArray("raw_voltage");
-  for (int i = 0; i < 3; i++) {
-    JsonArray batteryArray = rawVoltageArray.createNestedArray();
-    getChartData(&raw_voltage_charts[i], points, temp_data, &actual_points);
-    for (int j = 0; j < actual_points; j++) {
-      batteryArray.add(temp_data[j]);
-    }
-  }
-  
-  // Dati grafici raw corrente
   JsonArray rawCurrentArray = doc.createNestedArray("raw_current");
-  for (int i = 0; i < 3; i++) {
-    JsonArray batteryArray = rawCurrentArray.createNestedArray();
-    getChartData(&raw_current_charts[i], points, temp_data, &actual_points);
-    for (int j = 0; j < actual_points; j++) {
-      batteryArray.add(temp_data[j]);
-    }
-  }
-  
-  // Dati grafici motori PWM
   JsonArray motorArray = doc.createNestedArray("motors");
-  for (int i = 0; i < 3; i++) {
-    JsonArray motorData = motorArray.createNestedArray();
-    getChartData(&motor_charts[i], points, temp_data, &actual_points);
-    for (int j = 0; j < actual_points; j++) {
-      motorData.add(temp_data[j]);
+  JsonArray voltageStats = doc.createNestedArray("voltage_stats");
+  JsonArray currentStats = doc.createNestedArray("current_stats");
+  
+  if (useLongTerm && longTermStorage.initialized) {
+    // ===== DATI DA FLASH (Scale lunghe: 10m, 30m, 1h, 4h) =====
+    
+    // Alloca buffer per lettura long-term
+    LongTermDataPoint* ltBuffer = new LongTermDataPoint[points];
+    if (!ltBuffer) {
+      Serial.println("❌ Errore allocazione memoria per long-term data!");
+      doc["error"] = "Memoria insufficiente";
+      String response;
+      serializeJson(doc, response);
+      server.send(500, "application/json", response);
+      return;
+    }
+    
+    // Leggi dati long-term
+    int ltPoints = readLongTermData(ltBuffer, points, 0);
+    actual_points = ltPoints;
+    
+    // Estrai dati per ogni batteria
+    for (int i = 0; i < 3; i++) {
+      JsonArray vArray = voltageArray.createNestedArray();
+      JsonArray cArray = currentArray.createNestedArray();
+      JsonArray rvArray = rawVoltageArray.createNestedArray();
+      JsonArray rcArray = rawCurrentArray.createNestedArray();
+      
+      JsonObject vStats = voltageStats.createNestedObject();
+      JsonObject cStats = currentStats.createNestedObject();
+      
+      float vMin = 9999.0, vMax = -9999.0, vSum = 0.0;
+      float cMin = 9999.0, cMax = -9999.0, cSum = 0.0;
+      
+      for (int j = 0; j < ltPoints; j++) {
+        float v, c, rv, rc;
+        
+        if (i == 0) {
+          v = ltBuffer[j].v1; c = ltBuffer[j].c1;
+          rv = ltBuffer[j].rv1; rc = ltBuffer[j].rc1;
+        } else if (i == 1) {
+          v = ltBuffer[j].v2; c = ltBuffer[j].c2;
+          rv = ltBuffer[j].rv2; rc = ltBuffer[j].rc2;
+        } else {
+          v = ltBuffer[j].v3; c = ltBuffer[j].c3;
+          rv = ltBuffer[j].rv3; rc = ltBuffer[j].rc3;
+        }
+        
+        vArray.add(v);
+        cArray.add(c);
+        rvArray.add(rv);
+        rcArray.add(rc);
+        
+        // Statistiche
+        if (v < vMin) vMin = v;
+        if (v > vMax) vMax = v;
+        vSum += v;
+        if (c < cMin) cMin = c;
+        if (c > cMax) cMax = c;
+        cSum += c;
+      }
+      
+      vStats["min"] = vMin;
+      vStats["max"] = vMax;
+      vStats["avg"] = ltPoints > 0 ? vSum / ltPoints : 0.0;
+      vStats["samples"] = ltPoints;
+      
+      cStats["min"] = cMin;
+      cStats["max"] = cMax;
+      cStats["avg"] = ltPoints > 0 ? cSum / ltPoints : 0.0;
+      cStats["samples"] = ltPoints;
+    }
+    
+    // Dati motori PWM
+    for (int i = 0; i < 3; i++) {
+      JsonArray mArray = motorArray.createNestedArray();
+      for (int j = 0; j < ltPoints; j++) {
+        if (i == 0) mArray.add(ltBuffer[j].m1);
+        else if (i == 1) mArray.add(ltBuffer[j].m2);
+        else mArray.add(ltBuffer[j].m3);
+      }
+    }
+    
+    delete[] ltBuffer;
+    
+  } else {
+    // ===== DATI DA RAM (Scale brevi: 10s, 1m, 5m) =====
+    
+    for (int i = 0; i < 3; i++) {
+      JsonArray vArray = voltageArray.createNestedArray();
+      JsonArray cArray = currentArray.createNestedArray();
+      JsonArray rvArray = rawVoltageArray.createNestedArray();
+      JsonArray rcArray = rawCurrentArray.createNestedArray();
+      
+      JsonObject vStats = voltageStats.createNestedObject();
+      JsonObject cStats = currentStats.createNestedObject();
+      
+      // Tensioni
+      getChartData(&voltage_charts[i], points, temp_data, &actual_points);
+      for (int j = 0; j < actual_points; j++) {
+        vArray.add(temp_data[j]);
+      }
+      
+      // Correnti
+      getChartData(&current_charts[i], points, temp_data, &actual_points);
+      for (int j = 0; j < actual_points; j++) {
+        cArray.add(temp_data[j]);
+      }
+      
+      // Raw tensioni
+      getChartData(&raw_voltage_charts[i], points, temp_data, &actual_points);
+      for (int j = 0; j < actual_points; j++) {
+        rvArray.add(temp_data[j]);
+      }
+      
+      // Raw correnti
+      getChartData(&raw_current_charts[i], points, temp_data, &actual_points);
+      for (int j = 0; j < actual_points; j++) {
+        rcArray.add(temp_data[j]);
+      }
+      
+      // Statistiche
+      float min_val, max_val, avg_val;
+      getChartStats(&voltage_charts[i], &min_val, &max_val, &avg_val);
+      vStats["min"] = min_val;
+      vStats["max"] = max_val;
+      vStats["avg"] = avg_val;
+      vStats["samples"] = voltage_charts[i].total_samples;
+      
+      getChartStats(&current_charts[i], &min_val, &max_val, &avg_val);
+      cStats["min"] = min_val;
+      cStats["max"] = max_val;
+      cStats["avg"] = avg_val;
+      cStats["samples"] = current_charts[i].total_samples;
+    }
+    
+    // Dati motori PWM
+    for (int i = 0; i < 3; i++) {
+      JsonArray mArray = motorArray.createNestedArray();
+      getChartData(&motor_charts[i], points, temp_data, &actual_points);
+      for (int j = 0; j < actual_points; j++) {
+        mArray.add(temp_data[j]);
+      }
     }
   }
   
@@ -807,8 +1111,13 @@ void handleCharts() {
   
   // Metadati
   doc["scale"] = scale;
-  doc["points"] = points;
+  doc["points"] = actual_points;
   doc["timestamp"] = millis();
+  doc["source"] = useLongTerm ? "flash" : "ram";
+  
+  // Info storage
+  JsonObject storageInfo = doc.createNestedObject("storage_info");
+  getLongTermStorageInfo(storageInfo);
   
   String response;
   serializeJson(doc, response);
@@ -816,48 +1125,128 @@ void handleCharts() {
 }
 
 void handleCSV() {
-  String csv = "Timestamp,6S1_Voltage,6S1_Current,6S1_RawVoltage,6S1_RawCurrent,6S2_Voltage,6S2_Current,6S2_RawVoltage,6S2_RawCurrent,4S_Voltage,4S_Current,4S_RawVoltage,4S_RawCurrent,MotorRight,MotorLeft,MotorUnder\n";
+  // Controlla quale tipo di export richiede l'utente
+  String exportType = server.arg("type");  // "ram", "flash", "all" (default)
   
-  // Genera timestamp e dati CSV
-  int max_points = 0;
-  for (int i = 0; i < 3; i++) {
-    int points = voltage_charts[i].filled ? 300 : voltage_charts[i].index;
-    if (points > max_points) max_points = points;
+  String csv = "Timestamp_ms,6S1_Voltage,6S1_Current,6S1_RawVoltage,6S1_RawCurrent,";
+  csv += "6S2_Voltage,6S2_Current,6S2_RawVoltage,6S2_RawCurrent,";
+  csv += "4S_Voltage,4S_Current,4S_RawVoltage,4S_RawCurrent,";
+  csv += "MotorRight,MotorLeft,MotorUnder,Source\n";
+  
+  bool includeRam = (exportType == "ram" || exportType == "" || exportType == "all");
+  bool includeFlash = (exportType == "flash" || exportType == "" || exportType == "all");
+  
+  // ===== Export dati Flash (Long-term) - PIÙ VECCHI =====
+  if (includeFlash && longTermStorage.initialized && longTermStorage.total_points > 0) {
+    Serial.println("📤 Generazione CSV da Flash...");
+    
+    // Leggi tutti i dati long-term
+    LongTermDataPoint* ltBuffer = new LongTermDataPoint[longTermStorage.total_points];
+    if (ltBuffer) {
+      int ltPoints = readLongTermData(ltBuffer, longTermStorage.total_points, 0);
+      
+      for (int i = 0; i < ltPoints; i++) {
+        csv += String(ltBuffer[i].timestamp) + ",";
+        
+        // Batteria 1
+        csv += String(ltBuffer[i].v1, 2) + ",";
+        csv += String(ltBuffer[i].c1, 2) + ",";
+        csv += String(ltBuffer[i].rv1, 3) + ",";
+        csv += String(ltBuffer[i].rc1, 3) + ",";
+        
+        // Batteria 2
+        csv += String(ltBuffer[i].v2, 2) + ",";
+        csv += String(ltBuffer[i].c2, 2) + ",";
+        csv += String(ltBuffer[i].rv2, 3) + ",";
+        csv += String(ltBuffer[i].rc2, 3) + ",";
+        
+        // Batteria 3
+        csv += String(ltBuffer[i].v3, 2) + ",";
+        csv += String(ltBuffer[i].c3, 2) + ",";
+        csv += String(ltBuffer[i].rv3, 3) + ",";
+        csv += String(ltBuffer[i].rc3, 3) + ",";
+        
+        // Motori
+        csv += String(ltBuffer[i].m1) + ",";
+        csv += String(ltBuffer[i].m2) + ",";
+        csv += String(ltBuffer[i].m3) + ",";
+        csv += "Flash\n";
+      }
+      
+      delete[] ltBuffer;
+      Serial.printf("✅ Esportati %d campioni da Flash\n", ltPoints);
+    }
   }
   
-  for (int i = 0; i < max_points; i++) {
-    // Timestamp (secondi dall'inizio)
-    csv += String(i) + ",";
+  // ===== Export dati RAM (Short-term) - PIÙ RECENTI =====
+  if (includeRam) {
+    Serial.println("📤 Generazione CSV da RAM...");
     
-    // Dati batterie (convertiti e raw)
-    for (int j = 0; j < 3; j++) {
-      int idx = (voltage_charts[j].filled ? voltage_charts[j].index : 0 + i) % 300;
-      csv += String(voltage_charts[j].values[idx], 2) + ",";  // Tensione convertita
-      csv += String(current_charts[j].values[idx], 2) + ",";  // Corrente convertita
-      csv += String(raw_voltage_charts[j].values[idx], 3) + ","; // Tensione raw
-      csv += String(raw_current_charts[j].values[idx], 3);    // Corrente raw
-      if (j < 2) csv += ",";
+    int max_points = 0;
+    for (int i = 0; i < 3; i++) {
+      int points = voltage_charts[i].filled ? 300 : voltage_charts[i].index;
+      if (points > max_points) max_points = points;
     }
     
-    // Dati motori PWM
-    csv += ",";
-    for (int j = 0; j < 3; j++) {
-      int idx = (motor_charts[j].filled ? motor_charts[j].index : 0 + i) % 300;
-      csv += String(motor_charts[j].values[idx], 0);
-      if (j < 2) csv += ",";
+    // Calcola timestamp base (ultimi 5 minuti da ora)
+    unsigned long baseTimestamp = millis() - (max_points * 1000);
+    
+    for (int i = 0; i < max_points; i++) {
+      // Timestamp stimato
+      csv += String(baseTimestamp + (i * 1000)) + ",";
+      
+      // Dati batterie (convertiti e raw)
+      for (int j = 0; j < 3; j++) {
+        int idx = ((voltage_charts[j].filled ? voltage_charts[j].index : 0) + i) % 300;
+        csv += String(voltage_charts[j].values[idx], 2) + ",";  // Tensione convertita
+        csv += String(current_charts[j].values[idx], 2) + ",";  // Corrente convertita
+        csv += String(raw_voltage_charts[j].values[idx], 3) + ","; // Tensione raw
+        csv += String(raw_current_charts[j].values[idx], 3) + ",";    // Corrente raw
+      }
+      
+      // Dati motori PWM
+      for (int j = 0; j < 3; j++) {
+        int idx = ((motor_charts[j].filled ? motor_charts[j].index : 0) + i) % 300;
+        csv += String((int)motor_charts[j].values[idx]);
+        if (j < 2) csv += ",";
+      }
+      csv += ",RAM\n";
     }
-    csv += "\n";
+    
+    Serial.printf("✅ Esportati %d campioni da RAM\n", max_points);
   }
+  
+  // Genera nome file con timestamp
+  String filename = "battery_data_" + String(millis()/1000) + ".csv";
   
   server.sendHeader("Content-Type", "text/csv");
-  server.sendHeader("Content-Disposition", "attachment; filename=battery_data_complete.csv");
+  server.sendHeader("Content-Disposition", "attachment; filename=" + filename);
   server.send(200, "text/csv", csv);
+  
+  Serial.println("📥 CSV inviato al client");
 }
 
 void handleClearCharts() {
   if (server.method() == HTTP_POST) {
-    clearAllCharts();
-    server.send(200, "application/json", "{\"status\":\"ok\",\"message\":\"Grafici azzerati\"}");
+    // Parametro opzionale per cancellare anche Flash
+    String clearType = server.arg("type");  // "ram", "flash", "all" (default)
+    
+    bool clearRam = (clearType == "ram" || clearType == "" || clearType == "all");
+    bool clearFlash = (clearType == "flash" || clearType == "" || clearType == "all");
+    
+    if (clearRam) {
+      clearAllCharts();
+    }
+    
+    if (clearFlash) {
+      clearLongTermStorage();
+    }
+    
+    String message = clearRam && clearFlash ? "Tutti i dati azzerati (RAM + Flash)" :
+                     clearRam ? "Dati RAM azzerati" :
+                     clearFlash ? "Dati Flash azzerati" : "Nessun dato azzerato";
+    
+    server.send(200, "application/json", "{\"status\":\"ok\",\"message\":\"" + message + "\"}");
   } else {
     server.send(405, "application/json", "{\"status\":\"error\",\"message\":\"Metodo non consentito\"}");
   }
@@ -1157,18 +1546,26 @@ void handleChartsPage() {
   html += "<div class='controls'>";
   html += "<label>Scala temporale:</label>";
   html += "<select id='timeScale' onchange='changeScale()'>";
+  html += "<optgroup label='📊 RAM (Veloce - 1Hz)'>";
   html += "<option value='10s'>10 secondi</option>";
-  html += "<option value='30s'>30 secondi</option>";
-  html += "<option value='1m'>1 minuto</option>";
-  html += "<option value='2m'>2 minuti</option>";
-  html += "<option value='5m' selected>5 minuti</option>";
+  html += "<option value='1m' selected>1 minuto</option>";
+  html += "<option value='5m'>5 minuti</option>";
+  html += "</optgroup>";
+  html += "<optgroup label='💾 Flash (Lungo - 0.1Hz)'>";
+  html += "<option value='10m'>10 minuti</option>";
+  html += "<option value='30m'>30 minuti</option>";
+  html += "<option value='1h'>1 ora</option>";
+  html += "<option value='4h'>4 ore</option>";
+  html += "</optgroup>";
   html += "</select>";
   html += "<button onclick='exportCSV()'>📥 Esporta CSV</button>";
   html += "<button onclick='update()'>🔄 Aggiorna</button>";
   html += "<button onclick='toggleAutoUpdate()'>⏸️ Auto</button>";
   html += "<button onclick='resetZoom()'>🔍 Reset Zoom</button>";
   html += "<button onclick='toggleGrid()'>📐 Griglia</button>";
-  html += "<button onclick='clearCharts()' style='background:#ef4444;color:white'>🗑️ Azzera Dati</button>";
+  html += "<button onclick='clearCharts(\"ram\")' style='background:#f59e0b'>🗑️ Azzera RAM</button>";
+  html += "<button onclick='clearCharts(\"all\")' style='background:#ef4444;color:white'>🗑️ Azzera Tutto</button>";
+  html += "<span id='storageInfo' style='margin-left:10px;color:#94a3b8;font-size:12px'></span>";
   html += "</div>";
   
   html += "<div class='card'><h3>📊 Tensioni (V)</h3>";
@@ -1224,7 +1621,7 @@ void handleChartsPage() {
   html += "<a href='/'>← Torna al Monitor</a>";
   
   html += "<script>";
-  html += "let currentScale='5m';";
+  html += "let currentScale='1m';";
   html += "let autoUpdate=true;";
   html += "let vCtx,cCtx,rvCtx,rcCtx,mCtx;";
   html += "let colors=['#3b82f6','#10b981','#f59e0b'];";
@@ -1237,6 +1634,16 @@ void handleChartsPage() {
   html += "rvCtx=document.getElementById('rvChart').getContext('2d');";
   html += "rcCtx=document.getElementById('rcChart').getContext('2d');";
   html += "mCtx=document.getElementById('mChart').getContext('2d');";
+  html += "}";
+  html += "";
+  html += "function updateStorageInfo(storageInfo){";
+  html += "if(!storageInfo||!storageInfo.initialized)return;";
+  html += "let info='💾 Flash: '+storageInfo.total_points+'/'+storageInfo.max_points+' campioni';";
+  html += "if(storageInfo.coverage_hours){";
+  html += "info+=' ('+storageInfo.coverage_hours.toFixed(1)+'h)';";
+  html += "}";
+  html += "info+=' | '+storageInfo.spiffs_used_kb+'/'+storageInfo.spiffs_total_kb+'KB';";
+  html += "document.getElementById('storageInfo').textContent=info;";
   html += "}";
   html += "";
   html += "function changeScale(){";
@@ -1271,6 +1678,7 @@ void handleChartsPage() {
   html += "drawChart(rvCtx,d.raw_voltage || [],'raw');";
   html += "drawChart(rcCtx,d.raw_current || [],'raw');";
   html += "drawChart(mCtx,d.motors || [],'motor');";
+  html += "if(d.storage_info){updateStorageInfo(d.storage_info);}";
   html += "}";
   html += "})";
   html += ".catch(function(e){console.error('Errore:',e);});";
@@ -1427,16 +1835,17 @@ void handleChartsPage() {
   html += "window.open('/csv','_blank');";
   html += "}";
   html += "";
-  html += "function clearCharts(){";
-  html += "if(confirm('Sei sicuro di voler azzerare tutti i dati storici?')){";
-  html += "fetch('/clear-charts',{method:'POST'})";
+  html += "function clearCharts(type){";
+  html += "let msg=type==='ram'?'RAM (5 minuti)':type==='flash'?'Flash (4 ore)':'TUTTI i dati (RAM + Flash)';";
+  html += "if(confirm('Sei sicuro di voler azzerare '+msg+'?')){";
+  html += "fetch('/clear-charts?type='+(type||'all'),{method:'POST'})";
   html += ".then(function(r){return r.json();})";
   html += ".then(function(d){";
   html += "if(d.status==='ok'){";
-  html += "alert('Dati azzerati con successo!');";
+  html += "alert(d.message);";
   html += "update();";
   html += "}else{";
-  html += "alert('Errore durante l\\'azzeramento');";
+  html += "alert('Errore: '+d.message);";
   html += "}";
   html += "})";
   html += ".catch(function(e){alert('Errore: '+e);});";
@@ -1492,12 +1901,27 @@ void handleAPI() {
 
 void setup() {
   Serial.begin(115200);
-  Serial.println("🚀 AlixBlimp Battery Monitor & Motor Control");
+  Serial.println("🚀 AlixBlimp Battery Monitor & Motor Control v2.0");
   Serial.println("========================================");
+  Serial.println("📦 Storage Multi-Rate: RAM (5min @ 1Hz) + Flash (4h @ 0.1Hz)");
+  Serial.println();
+  
+  // Configurazione Pin
+  pinMode(DIR_RIGHT_PIN, OUTPUT);
+  pinMode(DIR_LEFT_PIN, OUTPUT);
+  
+  // Inizializzazione pin direzione (neutral)
+  digitalWrite(DIR_RIGHT_PIN, LOW);
+  digitalWrite(DIR_LEFT_PIN, LOW);
   
   // Configurazione ADC
   analogReadResolution(12);
   analogSetAttenuation(ADC_11db); // 0-3.3V range
+  
+  // Inizializzazione SPIFFS per storage lungo termine
+  if (!initLongTermStorage()) {
+    Serial.println("⚠️ Storage lungo termine non disponibile - continuo solo con RAM");
+  }
   
   // Inizializzazione Taratura
   initCalibration();
@@ -1514,27 +1938,15 @@ void setup() {
     initChart(&motor_charts[i]);
   }
   
-  // Configurazione PWM Output Motori (LEDC channels)
-  ledcSetup(PWM_OUT_RIGHT_CHANNEL, PWM_FREQ, 12);  // 50Hz, 12-bit resolution
+  // Configurazione PWM Output (LEDC channels) - CORRETTA per Arduino ESP32
+  ledcSetup(PWM_OUT_RIGHT_CHANNEL, PWM_FREQ, PWM_RESOLUTION);  // 50Hz, 16-bit resolution
   ledcAttachPin(PWM_OUT_RIGHT, PWM_OUT_RIGHT_CHANNEL);
-  ledcSetup(PWM_OUT_LEFT_CHANNEL, PWM_FREQ, 12);   // 50Hz, 12-bit resolution  
+  ledcSetup(PWM_OUT_LEFT_CHANNEL, PWM_FREQ, PWM_RESOLUTION);   // 50Hz, 16-bit resolution  
   ledcAttachPin(PWM_OUT_LEFT, PWM_OUT_LEFT_CHANNEL);
-  
-  // Configurazione PWM Output Direzione (LEDC channels)
-  ledcSetup(DIR_RIGHT_CHANNEL, PWM_FREQ, 12);      // 50Hz, 12-bit resolution
-  ledcAttachPin(DIR_RIGHT_PIN, DIR_RIGHT_CHANNEL);
-  ledcSetup(DIR_LEFT_CHANNEL, PWM_FREQ, 12);       // 50Hz, 12-bit resolution
-  ledcAttachPin(DIR_LEFT_PIN, DIR_LEFT_CHANNEL);
   
   // Inizializzazione PWM Output (posizione neutra)
   writePWM(PWM_OUT_RIGHT, PWM_CENTER);
   writePWM(PWM_OUT_LEFT, PWM_CENTER);
-  
-  // Inizializzazione PWM Direzione (disattivi)
-  writeDirPWM(DIR_RIGHT_PIN, false);
-  writeDirPWM(DIR_LEFT_PIN, false);
-  
-  Serial.println("✅ PWM Motori e Direzione configurati");
   
   // WiFi Access Point
   WiFi.softAP(ssid, password);
@@ -1574,8 +1986,11 @@ void loop() {
   // Telemetria
   sendTelemetry();
   
-  // Aggiorna grafici
+  // Aggiorna grafici RAM (ogni 1s)
   updateCharts();
+  
+  // Salva dati su Flash per storage lungo termine (ogni 10s)
+  saveLongTermDataPoint();
   
   // Web Server
   server.handleClient();
