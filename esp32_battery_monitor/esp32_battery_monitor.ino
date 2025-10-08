@@ -1276,38 +1276,16 @@ void handleClearLogs() {
 }
 
 void handleStorageInfo() {
-  // Informazioni sulla memoria SPIFFS
+  // Informazioni sulla memoria SPIFFS (veloce - non conta i file)
   size_t total = SPIFFS.totalBytes();
   size_t used = SPIFFS.usedBytes();
   size_t free = total - used;
-  
-  // Conta i file di log per ogni batteria
-  int file_counts[3] = {0, 0, 0};
-  
-  for (int bat = 0; bat < 3; bat++) {
-    for (int snap = 0; snap < 120; snap++) {
-      char filename[32];
-      sprintf(filename, "/logs/bat%d_%03d.bin", bat, snap);
-      if (SPIFFS.exists(filename)) {
-        file_counts[bat]++;
-      }
-    }
-  }
-  
-  // Calcola ore registrate (ogni file = 2 minuti di dati)
-  float hours_bat0 = (file_counts[0] * 2.0) / 60.0;
-  float hours_bat1 = (file_counts[1] * 2.0) / 60.0;
-  float hours_bat2 = (file_counts[2] * 2.0) / 60.0;
-  
-  // Percentuale riempimento (max 120 file per batteria)
-  float percent_bat0 = (file_counts[0] / 120.0) * 100.0;
-  float percent_bat1 = (file_counts[1] / 120.0) * 100.0;
-  float percent_bat2 = (file_counts[2] / 120.0) * 100.0;
   
   // Memoria disponibile per nuovi snapshot (approssimativo)
   int snapshot_size = sizeof(FlashLogSnapshot);
   int available_snapshots = free / snapshot_size;
   
+  // Usa i metadati già in RAM (molto più veloce!)
   String json = "{";
   json += "\"total_bytes\":" + String(total) + ",";
   json += "\"used_bytes\":" + String(used) + ",";
@@ -1319,11 +1297,15 @@ void handleStorageInfo() {
   
   for (int i = 0; i < 3; i++) {
     if (i > 0) json += ",";
-    float hours = (file_counts[i] * 2.0) / 60.0;
-    float percent = (file_counts[i] / 120.0) * 100.0;
+    
+    // Usa snapshot_count dai metadati in RAM
+    int file_count = flash_logs[i].snapshot_count;
+    float hours = (file_count * 2.0) / 60.0;
+    float percent = (file_count / 120.0) * 100.0;
+    
     json += "{";
     json += "\"id\":" + String(i) + ",";
-    json += "\"files\":" + String(file_counts[i]) + ",";
+    json += "\"files\":" + String(file_count) + ",";
     json += "\"hours\":" + String(hours, 1) + ",";
     json += "\"percent\":" + String(percent, 1) + ",";
     json += "\"filled\":" + String(flash_logs[i].filled ? "true" : "false") + ",";
