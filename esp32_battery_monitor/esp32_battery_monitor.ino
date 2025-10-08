@@ -55,9 +55,9 @@
 #define ADC_VREF           3.3
 #define ADC_SAMPLES        64
 
-// Parametri Sensori Corrente ACS758-50A
-#define ACS758_SENSITIVITY 0.04  // 40mV/A per modello 50A
-#define ACS758_VREF        2.5   // Tensione di riferimento (VCC/2)
+// Parametri Sensori Corrente ACS758 con Partitore
+#define ACS758_SENSITIVITY 0.01  // 10mV/A (dopo partitore 5V→3V)
+#define ACS758_VREF        1.6   // Tensione di riferimento @ 0A (dopo partitore)
 
 // Parametri Partitori Tensione
 #define DIVIDER_6S_RATIO   11   // 33.6V -> 3.05V
