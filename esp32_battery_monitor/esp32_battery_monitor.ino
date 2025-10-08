@@ -1086,7 +1086,7 @@ void handleCalibration() {
 }
 
 void handleCharts() {
-  DynamicJsonDocument doc(4096);
+  DynamicJsonDocument doc(16384);  // 16KB per gestire 120 punti × 5 grafici × 3 batterie
   
   // Ottieni parametri query
   String scale = server.arg("scale");
@@ -1190,8 +1190,18 @@ void handleCharts() {
   doc["points"] = points;
   doc["timestamp"] = millis();
   
+  // Verifica overflow JSON
+  if (doc.overflowed()) {
+    Serial.println("⚠️ ERRORE: JSON buffer overflow in handleCharts!");
+    server.send(500, "application/json", "{\"error\":\"JSON buffer overflow\"}");
+    return;
+  }
+  
   String response;
-  serializeJson(doc, response);
+  size_t len = serializeJson(doc, response);
+  Serial.printf("📊 JSON Charts: %d byte (capacità: %d byte, utilizzo: %.1f%%)\n", 
+                len, doc.capacity(), (len * 100.0) / doc.capacity());
+  
   server.send(200, "application/json", response);
 }
 
