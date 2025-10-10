@@ -21,6 +21,15 @@
 #include <SPIFFS.h>
 
 // ============================================================================
+// CONFIGURAZIONE SISTEMA
+// ============================================================================
+
+// Abilita/Disabilita la retromarcia
+// Se definito, i comandi indietro (1000-1500μs) vengono ignorati e i motori rimangono fermi
+// Se commentato, i motori possono andare sia avanti che indietro
+#define FORWARD_ONLY_MODE    // Commenta questa linea per abilitare la retromarcia
+
+// ============================================================================
 // CONFIGURAZIONE PIN
 // ============================================================================
 
@@ -914,20 +923,29 @@ void calculateMotorOutput() {
   // Logica corretta PWM:
   // AVANTI: 1500→1000, 2000→2000 (PWM ATTIVO)
   // INDIETRO: 1500→1000, 1000→2000 (PWM DISATTIVO)
+  
   // Per motore destro
   if (right_input <= PWM_CENTER) {
-    // 1000-1500: BACKWARD - mappa 1000→2000, 1500→1000
-    motor_output.right_pwm = map(right_input, PWM_MIN, PWM_CENTER, PWM_MAX, PWM_MIN);
-    writeDirPWM(DIR_RIGHT_PIN, false);  // BACKWARD - PWM DISATTIVO
-    // DEBUG: Stampa quando va indietro
-    if (right_input < 1500) {
-      Serial.printf("🔙 MOTORE DESTRO INDIETRO: Input=%d, Output=%d, DIR=PWM_OFF\n", right_input, motor_output.right_pwm);
-    }
+    // 1000-1500: BACKWARD
+    #ifdef FORWARD_ONLY_MODE
+      // MODALITÀ SOLO AVANTI: ignora comandi indietro, motore fermo
+      motor_output.right_pwm = PWM_MIN;  // 1000μs = fermo
+      writeDirPWM(DIR_RIGHT_PIN, false);
+      if (right_input < 1500) {
+        Serial.printf("⛔ MOTORE DESTRO BLOCCATO (FORWARD_ONLY): Input=%d ignorato\n", right_input);
+      }
+    #else
+      // Modalità normale: backward abilitato
+      motor_output.right_pwm = map(right_input, PWM_MIN, PWM_CENTER, PWM_MAX, PWM_MIN);
+      writeDirPWM(DIR_RIGHT_PIN, false);  // BACKWARD - PWM DISATTIVO
+      if (right_input < 1500) {
+        Serial.printf("🔙 MOTORE DESTRO INDIETRO: Input=%d, Output=%d, DIR=PWM_OFF\n", right_input, motor_output.right_pwm);
+      }
+    #endif
   } else {
-    // 1500-2000: FORWARD - mappa 1500→1000, 2000→2000
+    // 1500-2000: FORWARD - sempre abilitato
     motor_output.right_pwm = map(right_input, PWM_CENTER, PWM_MAX, PWM_MIN, PWM_MAX);
     writeDirPWM(DIR_RIGHT_PIN, true);   // FORWARD - PWM ATTIVO
-    // DEBUG: Stampa quando va avanti
     if (right_input > 1500) {
       Serial.printf("🔜 MOTORE DESTRO AVANTI: Input=%d, Output=%d, DIR=PWM_ON\n", right_input, motor_output.right_pwm);
     }
@@ -935,18 +953,26 @@ void calculateMotorOutput() {
   
   // Per motore sinistro
   if (left_input <= PWM_CENTER) {
-    // 1000-1500: BACKWARD - mappa 1000→2000, 1500→1000
-    motor_output.left_pwm = map(left_input, PWM_MIN, PWM_CENTER, PWM_MAX, PWM_MIN);
-    writeDirPWM(DIR_LEFT_PIN, false);   // BACKWARD - PWM DISATTIVO
-    // DEBUG: Stampa quando va indietro
-    if (left_input < 1500) {
-      Serial.printf("🔙 MOTORE SINISTRO INDIETRO: Input=%d, Output=%d, DIR=PWM_OFF\n", left_input, motor_output.left_pwm);
-    }
+    // 1000-1500: BACKWARD
+    #ifdef FORWARD_ONLY_MODE
+      // MODALITÀ SOLO AVANTI: ignora comandi indietro, motore fermo
+      motor_output.left_pwm = PWM_MIN;  // 1000μs = fermo
+      writeDirPWM(DIR_LEFT_PIN, false);
+      if (left_input < 1500) {
+        Serial.printf("⛔ MOTORE SINISTRO BLOCCATO (FORWARD_ONLY): Input=%d ignorato\n", left_input);
+      }
+    #else
+      // Modalità normale: backward abilitato
+      motor_output.left_pwm = map(left_input, PWM_MIN, PWM_CENTER, PWM_MAX, PWM_MIN);
+      writeDirPWM(DIR_LEFT_PIN, false);   // BACKWARD - PWM DISATTIVO
+      if (left_input < 1500) {
+        Serial.printf("🔙 MOTORE SINISTRO INDIETRO: Input=%d, Output=%d, DIR=PWM_OFF\n", left_input, motor_output.left_pwm);
+      }
+    #endif
   } else {
-    // 1500-2000: FORWARD - mappa 1500→1000, 2000→2000
+    // 1500-2000: FORWARD - sempre abilitato
     motor_output.left_pwm = map(left_input, PWM_CENTER, PWM_MAX, PWM_MIN, PWM_MAX);
     writeDirPWM(DIR_LEFT_PIN, true);    // FORWARD - PWM ATTIVO
-    // DEBUG: Stampa quando va avanti
     if (left_input > 1500) {
       Serial.printf("🔜 MOTORE SINISTRO AVANTI: Input=%d, Output=%d, DIR=PWM_ON\n", left_input, motor_output.left_pwm);
     }
@@ -2161,6 +2187,13 @@ void setup() {
   writeDirPWM(DIR_LEFT_PIN, false);
   
   Serial.println("✅ PWM Motori e Direzione configurati");
+  
+  // Indica modalità di controllo motori
+  #ifdef FORWARD_ONLY_MODE
+    Serial.println("⚠️  MODALITÀ: SOLO AVANTI (comandi indietro ignorati)");
+  #else
+    Serial.println("✅ MODALITÀ: AVANTI/INDIETRO abilitati");
+  #endif
   
   // WiFi Access Point
   WiFi.softAP(ssid, password);
