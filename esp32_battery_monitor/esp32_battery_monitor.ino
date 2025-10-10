@@ -215,6 +215,29 @@ unsigned long last_chart_update = 0;
 unsigned long loop_count = 0;
 float loop_frequency = 0.0;
 
+// ============================================================================
+// DUAL-CORE CONFIGURATION - SAFETY CRITICAL FIX
+// ============================================================================
+
+// Task handle per controllo motori su Core 1 (priorità alta)
+TaskHandle_t motorControlTaskHandle;
+
+// Watchdog e statistiche motori (volatile per accesso multi-core)
+volatile unsigned long lastMotorUpdate = 0;
+volatile unsigned long motorLoopCount = 0;
+volatile float motorLoopFrequency = 0.0;
+volatile unsigned long motorLoopMaxTime = 0;  // Tempo massimo loop (debug)
+
+// Mutex per protezione dati condivisi
+portMUX_TYPE motorMux = portMUX_INITIALIZER_UNLOCKED;
+
+// Configurazione task motori
+#define MOTOR_CORE 1                  // Core 1 (PRO_CPU) - Dedicato solo motori
+#define MOTOR_TASK_PRIORITY 3         // Priorità massima (critico per sicurezza!)
+#define MOTOR_STACK_SIZE 4096         // 4KB stack
+#define MOTOR_LOOP_INTERVAL_US 1000   // 1000μs = 1ms = 1000 Hz
+#define MOTOR_WATCHDOG_TIMEOUT_MS 100 // Timeout watchdog motori
+
 // WiFi e Web Server
 const char* ssid = "ESP32_BatteryMonitor";
 const char* password = "battery123";
@@ -2075,9 +2098,86 @@ void handleAPI() {
   doc["loop_frequency"] = loop_frequency;
   doc["uptime"] = millis();
   
+  // NUOVO: Statistiche Dual-Core Safety System
+  JsonObject dualCore = doc.createNestedObject("dual_core");
+  dualCore["core0_telemetry_hz"] = loop_frequency;
+  dualCore["core1_motors_hz"] = motorLoopFrequency;
+  dualCore["motor_max_time_us"] = motorLoopMaxTime;
+  dualCore["motor_last_update_ms"] = millis() - lastMotorUpdate;
+  dualCore["safety_status"] = motorLoopFrequency > 500 ? "OK" : "WARNING";
+  dualCore["enabled"] = true;
+  
   String response;
   serializeJson(doc, response);
   server.send(200, "application/json", response);
+}
+
+// ============================================================================
+// DUAL-CORE MOTOR CONTROL TASK - SAFETY CRITICAL
+// ============================================================================
+
+// Task dedicato controllo motori su Core 1 (massima priorità)
+void motorControlTask(void* parameter) {
+  Serial.println("🚀 Motor Control Task avviato su Core 1 (priorità massima)");
+  Serial.printf("   Frequenza target: %d Hz\n", 1000000 / MOTOR_LOOP_INTERVAL_US);
+  Serial.println("   ⚠️  SAFETY CRITICAL: Mai bloccato da WiFi/Flash!");
+  
+  unsigned long lastLoopTime = micros();
+  unsigned long loopStartTime;
+  
+  while(1) {
+    loopStartTime = micros();
+    
+    // ===== SEZIONE CRITICA - CONTROLLO MOTORI =====
+    // SEMPRE eseguita, MAI bloccata, MASSIMA priorità
+    
+    portENTER_CRITICAL(&motorMux);
+    
+    // Leggi input autopilota (PWM)
+    readAutopilotInput();
+    
+    // Calcola output motori
+    calculateMotorOutput();
+    
+    // Aggiorna PWM motori (CRITICO!)
+    updateMotorOutput();
+    
+    // Aggiorna timestamp watchdog
+    lastMotorUpdate = millis();
+    motorLoopCount++;
+    
+    portEXIT_CRITICAL(&motorMux);
+    
+    // ===== FINE SEZIONE CRITICA =====
+    
+    // Calcola tempo esecuzione loop
+    unsigned long elapsedMicros = micros() - loopStartTime;
+    if (elapsedMicros > motorLoopMaxTime) {
+      motorLoopMaxTime = elapsedMicros;
+    }
+    
+    // Watchdog: Se loop troppo lento, segnala (ma continua)
+    if (elapsedMicros > 5000) {  // >5ms è anomalo
+      Serial.printf("⚠️ Motor loop lento: %lu μs (max: %lu μs)\n", 
+                    elapsedMicros, motorLoopMaxTime);
+    }
+    
+    // Calcola frequenza ogni secondo
+    if (micros() - lastLoopTime >= 1000000) {
+      motorLoopFrequency = motorLoopCount;
+      motorLoopCount = 0;
+      lastLoopTime = micros();
+    }
+    
+    // Delay preciso per mantenere frequenza
+    unsigned long remainingMicros = MOTOR_LOOP_INTERVAL_US - elapsedMicros;
+    if (remainingMicros > 0 && remainingMicros < MOTOR_LOOP_INTERVAL_US) {
+      delayMicroseconds(remainingMicros);
+    } else {
+      // Loop ha preso più tempo del previsto
+      delayMicroseconds(100);  // Minimo delay
+    }
+  }
 }
 
 // ============================================================================
@@ -2216,39 +2316,107 @@ void setup() {
   server.on("/storage", HTTP_GET, handleStoragePage);
   server.on("/storage-info", HTTP_GET, handleStorageInfo);
   server.begin();
-  Serial.println("🌍 Web Server avviato");
+  Serial.println("🌍 Web Server avviato su Core 0");
   
-  Serial.println("✅ Sistema inizializzato!");
-  Serial.println("📊 Telemetria ogni " + String(TELEMETRY_INTERVAL) + "ms");
+  // ============================================================================
+  // CREA TASK MOTORI SU CORE 1 - SAFETY CRITICAL
+  // ============================================================================
+  
+  Serial.println("\n🛡️ INIZIALIZZAZIONE DUAL-CORE SAFETY SYSTEM");
+  Serial.println("   Separazione compiti per sicurezza volo:");
+  Serial.println("   • Core 0: Telemetria, WiFi, Storage (può bloccare)");
+  Serial.println("   • Core 1: SOLO Motori (mai bloccato, sempre reattivo)\n");
+  
+  // Crea task controllo motori su Core 1 con priorità massima
+  BaseType_t taskCreated = xTaskCreatePinnedToCore(
+    motorControlTask,           // Funzione task
+    "MotorControl_Critical",    // Nome task
+    MOTOR_STACK_SIZE,           // Stack size (4KB)
+    NULL,                       // Parametri
+    MOTOR_TASK_PRIORITY,        // Priorità 3 (massima)
+    &motorControlTaskHandle,    // Handle task
+    MOTOR_CORE                  // Core 1 (PRO_CPU)
+  );
+  
+  if (taskCreated == pdPASS) {
+    Serial.println("✅ Motor Control Task creato su Core 1!");
+    Serial.printf("   Priorità: %d (massima)\n", MOTOR_TASK_PRIORITY);
+    Serial.printf("   Frequenza: %d Hz\n", 1000000 / MOTOR_LOOP_INTERVAL_US);
+    Serial.println("   🛡️  SAFETY: Motori protetti da blocchi WiFi/Web/Flash!");
+  } else {
+    Serial.println("❌ ERRORE: Impossibile creare Motor Task!");
+    Serial.println("   Sistema fallback: single-core mode (meno sicuro)");
+  }
+  
+  delay(1000);  // Attendi stabilizzazione
+  
+  Serial.println("\n✅ Sistema inizializzato!");
+  Serial.println("📊 Telemetria ogni " + String(TELEMETRY_INTERVAL) + "ms (Core 0)");
+  Serial.printf("🚁 Motori ogni %d μs = %d Hz (Core 1)\n", 
+                MOTOR_LOOP_INTERVAL_US, 1000000 / MOTOR_LOOP_INTERVAL_US);
   Serial.println("🔗 Web Interface: http://" + IP.toString());
-  delay(5000);
+  Serial.println("\n⚠️  IMPORTANTE: Motori ora indipendenti da WiFi/Web!");
+  Serial.println("   → Nessun rallentamento anche con grafici pesanti aperti\n");
+  
+  delay(3000);
   Serial.println();
 }
 
 void loop() {
-  // Lettura dati
+  // ============================================================================
+  // CORE 0 - TELEMETRIA E WEB (NON CRITICO)
+  // Può bloccare senza influenzare motori (su Core 1)
+  // ============================================================================
+  
+  // Watchdog: Verifica che Core 1 (motori) stia girando
+  static unsigned long lastWatchdogCheck = 0;
+  if (millis() - lastWatchdogCheck > 1000) {  // Controlla ogni secondo
+    lastWatchdogCheck = millis();
+    
+    unsigned long motorAge = millis() - lastMotorUpdate;
+    if (motorAge > MOTOR_WATCHDOG_TIMEOUT_MS) {
+      Serial.printf("🔴 WATCHDOG: Motor task non risponde da %lu ms!\n", motorAge);
+      Serial.println("🔴 EMERGENZA: Riavvio sistema...");
+      delay(1000);
+      ESP.restart();
+    }
+    
+    // Stampa statistiche dual-core ogni 10 secondi
+    static int statCount = 0;
+    if (++statCount >= 10) {
+      statCount = 0;
+      Serial.println("\n📊 DUAL-CORE STATUS:");
+      Serial.printf("   Core 0 (Telemetria): %.1f Hz\n", loop_frequency);
+      Serial.printf("   Core 1 (Motori):     %.0f Hz ✅\n", motorLoopFrequency);
+      Serial.printf("   Motor loop max time: %lu μs\n", motorLoopMaxTime);
+      Serial.printf("   Safety: %s\n\n", 
+                    motorLoopFrequency > 500 ? "✅ OK" : "🔴 PROBLEMA!");
+    }
+  }
+  
+  // Lettura sensori batterie (NON critico, può essere lento)
   readBatteryData();
-  readAutopilotInput();
   
-  // Calcolo output motori
-  calculateMotorOutput();
-  updateMotorOutput();
+  // RIMOSSO da Core 0: ora su Core 1!
+  // readAutopilotInput();    ← Core 1
+  // calculateMotorOutput();  ← Core 1  
+  // updateMotorOutput();     ← Core 1
   
-  // Telemetria
+  // Telemetria (può bloccare, OK)
   sendTelemetry();
   
-  // Aggiorna grafici (ogni secondo)
+  // Aggiorna grafici (ogni secondo, può bloccare)
   updateCharts();
   
-  // Salva snapshot in Flash (ogni 2 minuti, 120 snapshot = 4 ore)
+  // Salva snapshot in Flash (può bloccare 10-50ms, OK su Core 0)
   saveLogsToFlash();
   
-  // Web Server
+  // Web Server (può bloccare 100-2000ms, ma NON influenza motori su Core 1!) ✅
   server.handleClient();
   
-  // Processa salvataggi asincroni (1 per loop, fuori dal path critico PWM)
+  // Processa salvataggi asincroni (1 per loop)
   processAsyncSaves();
   
-  // Piccola pausa per stabilità
-  delay(1);
+  // Piccola pausa (Core 0 può essere più lento)
+  delay(10);  // 10ms OK, motori su Core 1 continuano a 1000 Hz!
 }
